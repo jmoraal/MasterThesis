@@ -9,18 +9,20 @@ import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 
-nrSteps = 20
-dt = 1
+nrSteps = 500
+dt = 0.05
 PBCs = False
 domain = (0,1)
 #Define 0 to 1 as positive direction. 
 #TODO: re-think how to set domain. Probably best if it always starts at 0, so need not specify that here
-# initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # double brackets for easier generalisation to multiple dimensions
+initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # double brackets for easier generalisation to multiple dimensions
 # initialPositions = np.array([[0], [0.25], [0.5], [0.75], [1]]) 
 # charges = np.array([-1, -1, 1, 1, -1]) # or does 0/1 make more sense?
+charges = np.ones(5)
 
-initialPositions = np.array([[0.25], [0.75]]) 
-charges = np.array([-1, 1])
+
+# initialPositions = np.array([[0.25], [0.75]]) 
+# charges = np.array([-1, 1])
 
 nrParticles = np.shape(initialPositions)[0]
 dim = np.shape(initialPositions)[1]
@@ -125,7 +127,7 @@ for i in range(nrSteps):
         x[np.where(x > domain[1])] = domain[1]
         #yet to be adapted to multi-d
     
-    trajectories[i] = x
+    trajectories[i] = x+ 0.05 * np.sqrt(dt) * np.random.normal(size = (nrParticles,1))
     
     #TODO: somehow recognise dislocations having met and let them continue as one
     
