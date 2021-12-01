@@ -17,7 +17,7 @@ from numba import jit #just-in-time compiling. Yet to be implemented...
 # Example 1:
 # boxLength = 1
 # initialPositions = np.array([[0.02,0.02], [0.2,0.8], [0.8,0.5], [0.85,0.3], [1,0.8]]) 
-# charges = np.array([-1,1,1,-1,-1])
+# b = np.array([-1,1,1,-1,-1])
 # nrParticles = np.shape(initialPositions)[0]
 # dim = np.shape(initialPositions)[1]
 
@@ -26,8 +26,12 @@ boxLength = 1
 nrParticles = 50
 dim = 2
 initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
-charges = np.random.choice((-1,1),nrParticles)
-# charges = np.ones(nrParticles)
+# 0/1 charges:
+b = np.random.choice((-1,1),nrParticles)
+# arbitrary charges in [-1,1]: 
+b = b * np.random.rand(nrParticles)
+# b = np.ones(nrParticles)
+
 
 domain = ((0,boxLength),(0,boxLength))
 #Define 0 to 1 as positive direction. 
@@ -62,11 +66,11 @@ def kernel(x):
 #Idea: eventually give this as argument to `interaction' function
 
 
-def interaction(diff,dist,charges, PBCBool = True):
+def interaction(diff,dist,b, PBCBool = True):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges """
     
     np.fill_diagonal(dist, 1) #set distance from particle to itself to non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
-    chargeArray = charges * charges[:,np.newaxis] #create matrix b_i b_j
+    chargeArray = b * b[:,np.newaxis] #create matrix b_i b_j
     distCorrected = (dist**2 + eps) #normalise to avoid computational problems at singularity
     interactions = 1/nrParticles * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis] 
     
@@ -83,14 +87,14 @@ def projectParticles(x):
 
 
 
-# def PeachKoehler(x, charges):
+# def PeachKoehler(x, b):
 # May not be possible in this IPS-like system...
 
 # %%
 ### Simulation ###
 
 nrSteps = 500
-dt = 0.001
+dt = 0.003
 PBCs = True # Periodic Boundary Conditions
 randomness = False
 eps = 0.00001
@@ -99,10 +103,10 @@ sticky = True # whether or not collisions are sticky
 collTres = 0.01
 
 x = np.zeros((nrSteps, nrParticles, dim))
-chargesPerTime = np.zeros((nrSteps, nrParticles))
+bPerTime = np.zeros((nrSteps, nrParticles))
 x[0] = initialPositions
 simStartTime = timer.time() #to time simulation length
-
+bInitial = b
 for k in range(nrSteps-1):
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
     
@@ -114,14 +118,15 @@ for k in range(nrSteps-1):
         collidedPairs = np.where(dist < collTres) #format ([parts A], [parts B])
         #TODO may want something nicer than this construction... 
         
-        charges[collidedPairs[0]] = 0
-        charges[collidedPairs[1]] = 0
-        chargesPerTime[collidedPairs[0]] = 0 #to keep track of colours in animated plot (not yet working)
-        x[k, collidedPairs[1]] = x[k, collidedPairs[0]] #TODO Better: set to avg of both
-        
+        b[collidedPairs[0]] = (b[collidedPairs[0]] + b[collidedPairs[1]])/2
+        b[collidedPairs[1]] = 0
+        x[k, collidedPairs[1]] = (x[k, collidedPairs[0]] + x[k, collidedPairs[0]])/2 
         #TODO this is not precise enough; make sure only net charge 0 can annihilate
         
-    determ = np.sum(interaction(diff,dist,charges, PBCBool = PBCs),axis = 1) #deterministic part
+        # bPerTime[collidedPairs[0]] = b[collidedPairs[0]] #to keep track of colours in animated plot (not yet working)
+        # bPerTime[collidedPairs[1]] = b[collidedPairs[1]]
+        
+    determ = np.sum(interaction(diff,dist,b, PBCBool = PBCs),axis = 1) #deterministic part
     x[k+1] = x[k] + determ * dt 
     
     if randomness: 
@@ -143,11 +148,23 @@ print("Simulation duration was ", int(duration/3600), 'hours, ',
 
 # %%
 ### Plot animation ###
-
-colorDict = {-1:'red', 0:'grey', 1:'blue'}
-cols = np.vectorize(colorDict.get)(charges).tolist() #convert array of -1/0/1 to red/grey/blue
+#if only 0/1-values:
+# colorDict = {-1:'red', 0:'grey', 1:'blue'}
+# cols = np.vectorize(colorDict.get)(b).tolist() #convert array of -1/0/1 to red/grey/blue
 #TODO: this way, particles that collide at some point are gray from the beginning...
 #      can we set colours within update function?
+
+#if arbitrary values of b: 
+cols = [0]*nrParticles
+
+for i in range(nrParticles): 
+    if (bInitial[i] < 0): 
+        cols[i] = 'red'
+    # if ([i] == 0): 
+    #     cols[i] = 'grey'
+    if (bInitial[i] >= 0): 
+        cols[i] = 'blue'
+    
 
 
 fig = plt.figure()
