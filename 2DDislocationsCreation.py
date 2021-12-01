@@ -31,7 +31,12 @@ b = np.random.choice((-1,1),nrParticles)
 # arbitrary charges in [-1,1]: 
 b = b * np.random.rand(nrParticles)
 # b = np.ones(nrParticles)
-
+nrSourcesPerSide = 10
+nrSources = nrSourcesPerSide**2
+#TODO surely there is an easier way? (Typically meshgrid is used to plot via X,Y = meshgrid(...))
+mesh1D = np.linspace(0,boxLength, nrParticles)
+mesh2D = np.meshgrid(mesh1D, mesh1D) #creates two 2D arrays, combining elts with same indices gives point on grid
+sources = np.transpose(np.reshape(mesh2D)) #turn into list of points
 
 domain = ((0,boxLength),(0,boxLength))
 #Define 0 to 1 as positive direction. 
@@ -81,14 +86,20 @@ def interaction(diff,dist,b, PBCBool = True):
 def projectParticles(x):
     """Projects particles into box of given size."""
     
-    x = x % boxLength #also works in multi-D as long as box has same length in each dimensions 
+    x = x % boxLength #also works in multi-D as long as box has same length in each dimension 
 
     return x
 
 
 
-# def PeachKoehler(x, b):
-# May not be possible in this IPS-like system...
+def PeachKoehler(sources, x, b):
+    """Computes Peach-Koehler force for each source"""
+    
+    f = 0 #TODO (placeholder)
+    
+    return f
+    #TODO correctly implement stress fields (sigma)
+    #TODO correct normal vectors (probably not equal for all sources)
 
 # %%
 ### Simulation ###
