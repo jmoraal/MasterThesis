@@ -117,21 +117,35 @@ x = np.zeros((nrSteps, nrParticles, dim))
 bPerTime = np.zeros((nrSteps, nrParticles))
 x[0] = initialPositions
 simStartTime = timer.time() #to time simulation length
-bInitial = b
+bInitial = np.copy(b)
+
 for k in range(nrSteps-1):
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
+    determ = np.sum(interaction(diff,dist,b, PBCBool = PBCs),axis = 1) #deterministic part
+    x[k+1] = x[k] + determ * dt 
+    
+    
+    if randomness: 
+        random = sigma * np.random.normal(size = (nrParticles,dim)) #'noise' part
+        x[k+1] += random * np.sqrt(dt) 
+    
+    if PBCs: 
+        x[k+1] = projectParticles(x[k+1]) #places particles back into box
+    
+    newDist = pairwiseDistance(x[k+1], PBCs = PBCs)[1] #TODO work around this, really don't want to calculate all distances twice!
     
     if sticky: 
         # Idea: dist matrix symmetrical and don't want diagonal, so only take entries above diagonal. 
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
-        dist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
-        collidedPairs = np.where(dist < collTres) #format ([parts A], [parts B])
+        newDist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
+        collidedPairs = np.where(newDist < collTres) #format ([parts A], [parts B])
         #TODO may want something nicer than this construction... 
         
-        b[collidedPairs[0]] = (b[collidedPairs[0]] + b[collidedPairs[1]])/2
+        b[collidedPairs[0]] = 0 #(b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
-        x[k, collidedPairs[1]] = (x[k, collidedPairs[0]] + x[k, collidedPairs[0]])/2 
+        x[k+1, collidedPairs[0]] = x[k+1, collidedPairs[1]]  #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
+        # x[k+1, collidedPairs[1]] = (x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
         #TODO this is not precise enough; make sure only net charge 0 can annihilate
         
         # bPerTime[collidedPairs[0]] = b[collidedPairs[0]] #to keep track of colours in animated plot (not yet working)

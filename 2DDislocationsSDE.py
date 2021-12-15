@@ -88,7 +88,7 @@ def projectParticles(x):
 nrSteps = 500
 dt = 0.001
 PBCs = True # Periodic Boundary Conditions
-eps = 0.00001
+eps = 0.001
 sigma = 0.01 # influence of noise
 sticky = True # whether or not collisions are sticky
 collTres = 0.01
@@ -104,14 +104,16 @@ for k in range(nrSteps-1):
     determ = np.sum(interaction(diff,dist,charges, PBCBool = PBCs),axis = 1) #deterministic part
     random = sigma * np.random.normal(size = (nrParticles,dim)) #'noise' part
     x[k+1] = x[k] + determ * dt +  random * np.sqrt(dt) 
-    x = projectParticles(x) #places particles back into box
+    x[k+1] = projectParticles(x[k+1]) #places particles back into box
+    
+    newDist = pairwiseDistance(x[k+1], PBCs = PBCs)[1] #TODO work around this, really don't want to calculate all distances twice!
     
     if sticky: 
         # Idea: dist matrix symmetrical and don't want diagonal, so only take entries above diagonal. 
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
-        dist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
-        collidedPairs = np.where(dist < collTres) #format ([parts A], [parts B])
+        newDist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
+        collidedPairs = np.where(newDist < collTres) #format ([parts A], [parts B])
         #TODO may want something nicer than this construction... 
         
         charges[collidedPairs[0]] = 0
