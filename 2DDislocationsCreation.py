@@ -38,7 +38,7 @@ mesh1D = np.linspace(0,boxLength, nrParticles)
 mesh2D = np.meshgrid(mesh1D, mesh1D) #creates two 2D arrays, combining elts with same indices gives point on grid
 sources = np.transpose(np.reshape(mesh2D)) #turn into list of points
 
-domain = ((0,boxLength),(0,boxLength))
+domain = ((0,boxLength),)*dim
 #Define 0 to 1 as positive direction. 
 
 
@@ -165,7 +165,7 @@ print("Simulation duration was ", int(duration/3600), 'hours, ',
 #TODO: this way, particles that collide at some point are gray from the beginning...
 #      can we set colours within update function?
 
-#if arbitrary values of b: 
+#if general values of b, not only 0/1: 
 cols = [0]*nrParticles
 
 for i in range(nrParticles): 
