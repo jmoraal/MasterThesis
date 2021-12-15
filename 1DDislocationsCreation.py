@@ -13,26 +13,30 @@ Created on Wed Oct 27 13:55:22 2021
 """
 
 import numpy as np
-#from matplotlib import pyplot as plt
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import time as timer
-import numba
-from numba import jit #just-in-time compiling. Yet to be implemented...
+# import numba
+# from numba import jit #just-in-time compiling. Yet to be implemented...
 
 
 
 ### Example 1:
 boxLength = 1
 initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # double brackets for easier generalisation to multiple dimensions
-b = np.array([-1, -1, 1, 1, -1]) # or does 0/1 make more sense?
-# b = np.array([-1,1,1,-1,-1])
-# b= np.ones(5)
+b = np.array([-1, -1, 1, 1, -1]) 
 
+# Creation time, place and 'orientation' (positive/negative charge order):
+creation = (0.3, [0.5], [-1,1])
+
+    
+### Example 1:
+boxLength = 1
 # initialPositions = np.array([[0.25], [0.75]]) 
 # b= np.array([-1, 1])
 
-nrParticles = np.shape(initialPositions)[0]
+
+initialNrParticles = np.shape(initialPositions)[0]
 dim = np.shape(initialPositions)[1]
 domain = (0,boxLength)
 
@@ -95,7 +99,7 @@ def interaction(diff,dist,b, PBCBool = True):
     np.fill_diagonal(dist, 1) #set distance from particle to itself to non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] #create matrix b_i b_j
     distCorrected = (dist**2 + eps) #normalise to avoid computational problems at singularity
-    interactions = 1/nrParticles * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis] 
+    interactions = 1/len(b) * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis]  #len(b) is nr of particles
     
     return interactions
 #TODO: make regularisation (+eps above) variable!
@@ -104,7 +108,7 @@ def interaction(diff,dist,b, PBCBool = True):
 def projectParticles(x):
     """Projects particles into box of given size."""
     
-    x = x % boxLength #also works in multi-D as long as box has same length in each dimension 
+    x = x % boxLength #also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
 
     return x
 
@@ -119,10 +123,10 @@ def PeachKoehler(sources, x, b):
     #TODO correctly implement stress fields (sigma)
     #TODO correct normal vectors (probably not equal for all sources)
 
-# %%
-### Simulation ###
+# %% SIMULATION
 
-nrSteps = 500
+### Simulation settings
+simTime = 1
 dt = 0.003
 PBCs = False # Periodic Boundary Conditions
 randomness = False
@@ -133,17 +137,40 @@ collTres = 0.001 #Collision threshold; if particles are closer than this, they a
 #TODO: additionally require particles to have opposite charges (otherwise, there
 #      exist initial configurations where same-charge particles wrongly collide)
 
+
+### Precomputation
+nrSteps = int(simTime/dt) #rounds fraction down to integer (floor)
+nrCreations = 2 #*len(creation[0]) #at every creation time, two new dislocations are introduced
+nrParticles = initialNrParticles + nrCreations
+
 x = np.zeros((nrSteps, nrParticles, dim))
 bPerTime = np.zeros((nrSteps, nrParticles))
-x[0] = initialPositions
+x[0,:initialNrParticles,:] = initialPositions
 simStartTime = timer.time() #to time simulation length
+b = np.append(b, np.zeros(nrCreations))
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
+creationStep = np.floor(creation[0]/dt)
+
+
+### Simulation loop
 for k in range(nrSteps-1):
-    diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
-    determ = np.sum(interaction(diff,dist,b, PBCBool = PBCs),axis = 1) #deterministic part
-    x[k+1] = x[k] + determ * dt 
+    # Creation: 
+    if (k == creationStep): 
+        creationLocation, creationOrder = creation[1], creation[2]
+        x[k, -2] = creationLocation + np.array([creationOrder[0] * collTres * 0.5]) # set location, distance of collision treshold apart
+        x[k, -1] = creationLocation + np.array([creationOrder[1] * collTres * 0.5]) # sort of ugly fix, but should make generalisation to 2D easier
+        b[-2:] = creationOrder #set charges as specified before
     
+    # main forces/interaction: 
+    diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
+    interactions = interaction(diff,dist,b, PBCBool = PBCs)
+    
+    if (k - creationStep < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
+        interactions[:,-2:,-2:] = 0 
+    
+    updates = np.sum(interactions,axis = 1) #deterministic part
+    x[k+1] = x[k] + updates * dt 
     
     if randomness: 
         random = sigma * np.random.normal(size = (nrParticles,dim)) #'noise' part
@@ -170,6 +197,8 @@ for k in range(nrSteps-1):
         
         # bPerTime[collidedPairs[0]] = b[collidedPairs[0]] #to keep track of colours in animated plot (not yet working)
         # bPerTime[collidedPairs[1]] = b[collidedPairs[1]]
+        
+        
         
     
     
