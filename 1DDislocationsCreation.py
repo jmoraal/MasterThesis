@@ -22,18 +22,20 @@ import time as timer
 
 
 ### Example 1:
-boxLength = 1
-initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # double brackets for easier generalisation to multiple dimensions
-b = np.array([-1, -1, 1, 1, -1]) 
+# boxLength = 1
+# initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
+# b = np.array([-1, -1, 1, 1, -1]) # Particle charges
 
 # Creation time, place and 'orientation' (positive/negative charge order):
-creation = (0.15, [0.5], [-1,1])
+creations = np.array([[0.01, 0.4, 1, -1]]) #[0.15, 0.5, -1, 1]])#, 
+                      #[0.3, 0.2, 1, -1]])
+# Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
 
     
-### Example 1:
+### Example 2:
 boxLength = 1
-# initialPositions = np.array([[0.25], [0.75]]) 
-# b= np.array([-1, 1])
+initialPositions = np.array([[0.0], [1.0]]) 
+b= np.array([-1, 1])
 
 
 initialNrParticles = np.shape(initialPositions)[0]
@@ -90,19 +92,20 @@ def kernel(x):
     """ Given array of coordinates, compute log-kernel of particles """
     
     return np.log(pairwiseDistance(x))
-#Idea: eventually give this as argument to `interaction' function
+#Idea: eventually give this as argument to `interaction' function. Currently not used
 
 
 def interaction(diff,dist,b, PBCBool = True):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges """
     
-    np.fill_diagonal(dist, 1) #set distance from particle to itself to non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
-    chargeArray = b * b[:,np.newaxis] #create matrix b_i b_j
-    distCorrected = (dist**2 + eps) #normalise to avoid computational problems at singularity
+    np.fill_diagonal(dist, 1) # Set distance from particle to itself to non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
+    chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
+    distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity
     interactions = 1/len(b) * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis]  #len(b) is nr of particles
+    interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     return interactions, chargeArray
-#TODO: make regularisation (+eps above) variable!
+#TODO: make regularisation (+eps above) variable
 
     
 def projectParticles(x):
@@ -126,68 +129,82 @@ def PeachKoehler(sources, x, b):
 # %% SIMULATION
 
 ### Simulation settings
-simTime = 1
-dt = 0.003
-PBCs = False # Periodic Boundary Conditions
-randomness = False
-eps = 0.001 # to avoid singular force makig computation instable. 
-sigma = 0.01 # influence of noise
-sticky = True # whether or not collisions are sticky
-collTres = 0.005 #Collision threshold; if particles are closer than this, they are considered collided
-#TODO: additionally require particles to have opposite charges (otherwise, there
-#      exist initial configurations where same-charge particles wrongly collide)
+simTime = 0.02         # Total simulation time
+dt = 0.002          # Timestep for discretisation
+PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+eps = 0.001         # To avoid singular force makig computation instable. 
+randomness = False  # Whether to add random noise to dislocation positions
+sigma = 0.01        # Influence of noise
+sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
+collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 
 
 ### Precomputation
-nrSteps = int(simTime/dt) #rounds fraction down to integer (floor)
-nrCreations = 2 #*len(creation[0]) #at every creation time, two new dislocations are introduced
-nrParticles = initialNrParticles + nrCreations
+nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
+nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
+nrParticles = initialNrParticles + nrCreations 
 
 x = np.zeros((nrSteps, nrParticles, dim))
 x[0,:initialNrParticles,:] = initialPositions
-x[0,initialNrParticles:,:] = np.nan
+x[0,initialNrParticles:,:] = np.nan # Effectively keeps particles out of system before creation
 
 bPerTime = np.zeros((nrSteps, nrParticles))
 b = np.append(b, np.zeros(nrCreations))
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
-creationStep = np.floor(creation[0]/dt)
+creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
+creationCounter = 0
+stepsSinceCreation = np.ones(len(creations)) * -1
+
 
 simStartTime = timer.time() #to time simulation length
 
 ### Simulation loop
 for k in range(nrSteps-1):
     # Creation: 
-    if (k == creationStep): 
-        creationLocation, creationOrder = creation[1], creation[2]
-        x[k, -2] = creationLocation - np.array([collTres * 0.5]) # set location, distance of collision treshold apart
-        x[k, -1] = creationLocation + np.array([collTres * 0.5]) # sort of ugly fix, but should make generalisation to 2D easier
-        b[-2:] = creationOrder #set charges as specified before. TODO does not seem to make a difference yet...
+    if (k == creationSteps[creationCounter]): 
+        creationLocation = creations[creationCounter][1]
+        creationOrder = creations[creationCounter][-2:]
+        
+        idx = initialNrParticles + creationCounter
+        x[k, idx] = np.array([creationLocation - collTres]) # Set location, distance of collision treshold apart
+        x[k, idx + 1] = np.array([creationLocation + collTres]) # Array construct is sort of ugly fix, but should make generalisation to 2D easier
+        b[idx : idx + 2] = creationOrder # Set charges as specified before. #TODO does not seem to make a difference yet...
+        
+        stepsSinceCreation[creationCounter] = 0
+        creationCounter += 1
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs)
     
-    if (k - creationStep < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
-        interactions[:,-2:,-2:] = 0 
+    for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
+        if (0 <= stepsSinceCreation[i] < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
+            idx = initialNrParticles + i
+            interactions[:,idx : idx + 2,idx : idx + 2] = -1000 #*= -10/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
+            print(idx)
+            print(interactions[3])
+            stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) #deterministic part; treating NaNs as zero
     x[k+1] = x[k] + updates * dt 
     
     if randomness: 
-        random = sigma * np.random.normal(size = (nrParticles,dim)) #'noise' part
+        random = sigma * np.random.normal(size = (nrParticles,dim)) # 'noise' part
         x[k+1] += random * np.sqrt(dt) 
     
     if PBCs: 
         x[k+1] = projectParticles(x[k+1]) #places particles back into box
     
-    newDist = pairwiseDistance(x[k+1], PBCs = PBCs)[1] #TODO work around this, really don't want to calculate all distances twice!
     
     if sticky: 
+        newDist = np.nan_to_num(pairwiseDistance(x[k+1], PBCs = PBCs)[1], nan = 1000) #TODO work around this, really don't want to calculate all distances twice!
+        #set nan to arbitrary large number
+        
         # Idea: dist matrix symmetrical and don't want diagonal, so only take entries above diagonal. 
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
-        newDist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
+        newDist += 1000*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
         collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) #format ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
         #TODO may want something nicer than this construction... 
         
@@ -195,18 +212,14 @@ for k in range(nrSteps-1):
         b[collidedPairs[1]] = 0
         x[k+1, collidedPairs[0]] = np.nan #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
         x[k+1, collidedPairs[1]] = np.nan #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
-        #TODO this is not precise enough; make sure only net charge 0 can annihilate
         
         # bPerTime[collidedPairs[0]] = b[collidedPairs[0]] #to keep track of colours in animated plot (not yet working)
         # bPerTime[collidedPairs[1]] = b[collidedPairs[1]]
         
-        
-        
-    
-    
     
     if(k % int(nrSteps/10) == 0):
         print(f"{k} / {nrSteps}")
+
 
 duration = timer.time() - simStartTime
 print("Simulation duration was ", int(duration/3600), 'hours, ', 
@@ -269,15 +282,13 @@ def plotAnim(bInitial, x):
 
 
 #1D plot:    
-def plot1D(bInitial, x, endTime): 
+def plot1D(bInitial, x, endTime, nrCreations): 
     plt.clf() # Clears current figure
     
     trajectories = np.ndarray.squeeze(x)
     colorDict = {-1:'red', 0:'grey', 1:'blue'}
-    bInitial[-2:] = creation[2] #set colour of created dislocations according to charge they eventually get (not 0 as beginning)
-    # cols = np.vectorize(colorDict.get)(bInitial).tolist()
-    # plt.gca().set_color_cycle(cols)
-    # plt.plot(trajectories, range(nrSteps)) #c = cols does not work; only takes one colour at a time
+    bInitial[-nrCreations:] = creations[:,-2:].flatten() 
+    #set colour of created dislocations according to charge they eventually get (not 0 as beginning)
     
     nrPoints, nrTrajectories = np.shape(trajectories)
     
@@ -288,5 +299,9 @@ def plot1D(bInitial, x, endTime):
         plt.plot(trajectories[:,i], yAxis, c = colorDict.get(bInitial[i]))
 
 #TODO: figure out how to plot trajectories w/ particles jumping sides.
+# Possibility: insert NaN at 'discontinuities': 
+    # pos = np.where(np.abs(np.diff(y)) >= 0.5)[0]+1
+    # x = np.insert(x, pos, np.nan)
+    # y = np.insert(y, pos, np.nan)
 
-plot1D(bInitial, x, simTime)
+plot1D(bInitial, x, simTime, nrCreations)
