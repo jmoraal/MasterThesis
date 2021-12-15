@@ -15,21 +15,21 @@ from numba import jit #just-in-time compiling. Yet to be implemented...
 
 
 # Example 1:
-boxLength = 1
-initialPositions = np.array([[0.02,0.02], [0.2,0.8], [0.8,0.5], [0.85,0.3], [1,0.8]]) 
-charges = np.array([-1,1,1,-1,-1])
-nrParticles = np.shape(initialPositions)[0]
-dim = np.shape(initialPositions)[1]
+# boxLength = 1
+# initialPositions = np.array([[0.02,0.02], [0.2,0.8], [0.8,0.5], [0.85,0.3], [1,0.8]]) 
+# charges = np.array([-1,1,1,-1,-1])
+# nrParticles = np.shape(initialPositions)[0]
+# dim = np.shape(initialPositions)[1]
 
 # Example 2:
-# boxLength = 3
-# nrParticles = 20
-# dim = 2
-# initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
-# charges = np.random.choice((-1,1),nrParticles)
-# charges = np.ones(nrParticles)
+boxLength = 1
+nrParticles = 20
+dim = 2
+initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
+charges = np.random.choice((-1,1),nrParticles)
 
-domain = ((0,boxLength),(0,boxLength))
+
+domain = ((0,boxLength),)*2
 #Define 0 to 1 as positive direction. 
 
 
@@ -95,6 +95,7 @@ collTres = 0.01
 
 x = np.zeros((nrSteps, nrParticles, dim))
 chargesPerTime = np.zeros((nrSteps, nrParticles))
+chargesInit = np.copy(charges)
 x[0] = initialPositions
 simStartTime = timer.time() #to time simulation length
 
@@ -114,8 +115,9 @@ for k in range(nrSteps-1):
         #TODO may want something nicer than this construction... 
         
         charges[collidedPairs[0]] = 0
-        chargesPerTime[collidedPairs[0]] = 0 #to keep track of colours in animated plot (not yet working)
-        x[k, collidedPairs[1]] = x[k, collidedPairs[0]]
+        charges[collidedPairs[1]] = 0
+        chargesPerTime[k,collidedPairs[0]] = 0 #to keep track of colours in animated plot (not yet working)
+        x[k+1, collidedPairs[1]] = x[k+1, collidedPairs[0]]
         
     
     if(k % (nrSteps/10) == 0):
