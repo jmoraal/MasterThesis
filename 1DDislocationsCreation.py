@@ -101,7 +101,7 @@ def interaction(diff,dist,b, PBCBool = True):
     distCorrected = (dist**2 + eps) #normalise to avoid computational problems at singularity
     interactions = 1/len(b) * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis]  #len(b) is nr of particles
     
-    return interactions
+    return interactions, chargeArray
 #TODO: make regularisation (+eps above) variable!
 
     
@@ -166,7 +166,7 @@ for k in range(nrSteps-1):
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
-    interactions = interaction(diff,dist,b, PBCBool = PBCs)
+    interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs)
     
     if (k - creationStep < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
         interactions[:,-2:,-2:] = 0 
@@ -188,7 +188,7 @@ for k in range(nrSteps-1):
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
         newDist += 10*np.tril(np.ones((nrParticles,nrParticles))) #arbitrary large number, so that effectiv
-        collidedPairs = np.where(newDist < collTres) #format ([parts A], [parts B])
+        collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) #format ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
         #TODO may want something nicer than this construction... 
         
         b[collidedPairs[0]] = 0 #(b[collidedPairs[0]] + b[collidedPairs[1]])/2
