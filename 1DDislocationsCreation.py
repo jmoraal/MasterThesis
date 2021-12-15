@@ -27,7 +27,7 @@ initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # double bracke
 b = np.array([-1, -1, 1, 1, -1]) 
 
 # Creation time, place and 'orientation' (positive/negative charge order):
-creation = (0.3, [0.5], [-1,1])
+creation = (0.15, [0.5], [-1,1])
 
     
 ### Example 1:
@@ -133,7 +133,7 @@ randomness = False
 eps = 0.001 # to avoid singular force makig computation instable. 
 sigma = 0.01 # influence of noise
 sticky = True # whether or not collisions are sticky
-collTres = 0.001 #Collision threshold; if particles are closer than this, they are considered collided
+collTres = 0.005 #Collision threshold; if particles are closer than this, they are considered collided
 #TODO: additionally require particles to have opposite charges (otherwise, there
 #      exist initial configurations where same-charge particles wrongly collide)
 
@@ -144,23 +144,25 @@ nrCreations = 2 #*len(creation[0]) #at every creation time, two new dislocations
 nrParticles = initialNrParticles + nrCreations
 
 x = np.zeros((nrSteps, nrParticles, dim))
-bPerTime = np.zeros((nrSteps, nrParticles))
 x[0,:initialNrParticles,:] = initialPositions
-simStartTime = timer.time() #to time simulation length
+x[0,initialNrParticles:,:] = np.nan
+
+bPerTime = np.zeros((nrSteps, nrParticles))
 b = np.append(b, np.zeros(nrCreations))
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
 creationStep = np.floor(creation[0]/dt)
 
+simStartTime = timer.time() #to time simulation length
 
 ### Simulation loop
 for k in range(nrSteps-1):
     # Creation: 
     if (k == creationStep): 
         creationLocation, creationOrder = creation[1], creation[2]
-        x[k, -2] = creationLocation + np.array([creationOrder[0] * collTres * 0.5]) # set location, distance of collision treshold apart
-        x[k, -1] = creationLocation + np.array([creationOrder[1] * collTres * 0.5]) # sort of ugly fix, but should make generalisation to 2D easier
-        b[-2:] = creationOrder #set charges as specified before
+        x[k, -2] = creationLocation - np.array([collTres * 0.5]) # set location, distance of collision treshold apart
+        x[k, -1] = creationLocation + np.array([collTres * 0.5]) # sort of ugly fix, but should make generalisation to 2D easier
+        b[-2:] = creationOrder #set charges as specified before. TODO does not seem to make a difference yet...
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
@@ -169,7 +171,7 @@ for k in range(nrSteps-1):
     if (k - creationStep < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
         interactions[:,-2:,-2:] = 0 
     
-    updates = np.sum(interactions,axis = 1) #deterministic part
+    updates = np.nansum(interactions,axis = 1) #deterministic part; treating NaNs as zero
     x[k+1] = x[k] + updates * dt 
     
     if randomness: 
@@ -191,8 +193,8 @@ for k in range(nrSteps-1):
         
         b[collidedPairs[0]] = 0 #(b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
-        x[k+1, collidedPairs[0]] = x[k+1, collidedPairs[1]]  #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
-        # x[k+1, collidedPairs[1]] = (x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
+        x[k+1, collidedPairs[0]] = np.nan #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
+        x[k+1, collidedPairs[1]] = np.nan #(x[k+1, collidedPairs[0]] + x[k+1, collidedPairs[1]])/2 
         #TODO this is not precise enough; make sure only net charge 0 can annihilate
         
         # bPerTime[collidedPairs[0]] = b[collidedPairs[0]] #to keep track of colours in animated plot (not yet working)
@@ -203,7 +205,7 @@ for k in range(nrSteps-1):
     
     
     
-    if(k % (nrSteps/10) == 0):
+    if(k % int(nrSteps/10) == 0):
         print(f"{k} / {nrSteps}")
 
 duration = timer.time() - simStartTime
@@ -267,20 +269,24 @@ def plotAnim(bInitial, x):
 
 
 #1D plot:    
-def plot1D(bInitial, x): 
+def plot1D(bInitial, x, endTime): 
     plt.clf() # Clears current figure
     
     trajectories = np.ndarray.squeeze(x)
     colorDict = {-1:'red', 0:'grey', 1:'blue'}
+    bInitial[-2:] = creation[2] #set colour of created dislocations according to charge they eventually get (not 0 as beginning)
     # cols = np.vectorize(colorDict.get)(bInitial).tolist()
     # plt.gca().set_color_cycle(cols)
     # plt.plot(trajectories, range(nrSteps)) #c = cols does not work; only takes one colour at a time
     
     nrPoints, nrTrajectories = np.shape(trajectories)
     
+    plt.ylim((0,endTime))
+    yAxis = np.linspace(0, endTime, nrPoints)
+    
     for i in range(nrTrajectories):
-        plt.plot(trajectories[:,i], range(nrPoints), c = colorDict.get(bInitial[i]))
+        plt.plot(trajectories[:,i], yAxis, c = colorDict.get(bInitial[i]))
 
 #TODO: figure out how to plot trajectories w/ particles jumping sides.
 
-plot1D(bInitial, x)
+plot1D(bInitial, x, simTime)
