@@ -16,7 +16,7 @@ import time as timer
 simTime = 2         # Total simulation time
 dt = 0.001          # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff'
+reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
 eps = 0.0001           # To avoid singular force makig computation instable. 
 cutoff = 50         # To avoid singular force makig computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
@@ -71,14 +71,8 @@ def setExample(N):
 setExample(3)
 
 ### Create grid, e.g. as possible sources: 
-# nrSourcesPerSide = 10
-# nrSources = nrSourcesPerSide**2
-# #TODO surely there is an easier way? (Typically meshgrid is used to plot via X,Y = meshgrid(...))
-# mesh1D = np.linspace(0,boxLength, nrParticles)
-# mesh2D = np.meshgrid(mesh1D, mesh1D) #creates two 2D arrays, combining elts with same indices gives point on grid
-# sources = np.transpose(np.reshape(mesh2D)) #turn into list of points
-# domain = ((0,boxLength),)*dim
-#Define 0 to 1 as positive direction. 
+nrSources = 10
+sources = np.linspace(0,boxLength, nrSources)
 
 
 # %%
@@ -128,7 +122,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'cutoff': 
-        interactions = np.clip(interactions, -cutoff, cutoff) #sets all values outside [-c,c] to value of closest boundary
+        interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
     
     return interactions, chargeArray
 #TODO: make regularisation (+eps above) variable
