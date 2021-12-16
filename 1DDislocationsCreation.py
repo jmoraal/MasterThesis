@@ -21,21 +21,21 @@ import time as timer
 
 
 
-### Example 1:
-# boxLength = 1
-# initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
-# b = np.array([-1, -1, 1, 1, -1]) # Particle charges
+## Example 1:
+boxLength = 1
+initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
+b = np.array([-1, -1, 1, 1, -1]) # Particle charges
 
 # Creation time, place and 'orientation' (positive/negative charge order):
-creations = np.array([[0.01, 0.4, 1, -1]]) #[0.15, 0.5, -1, 1]])#, 
-                      #[0.3, 0.2, 1, -1]])
+creations = np.array([[0.15, 0.5, -1, 1],
+                      [0.3, 0.2, 1, -1]])
 # Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
 
     
 ### Example 2:
-boxLength = 1
-initialPositions = np.array([[0.0], [1.0]]) 
-b= np.array([-1, 1])
+# boxLength = 1
+# initialPositions = np.array([[0.0], [1.0]]) 
+# b= np.array([-1, 1])
 
 
 initialNrParticles = np.shape(initialPositions)[0]
@@ -129,7 +129,7 @@ def PeachKoehler(sources, x, b):
 # %% SIMULATION
 
 ### Simulation settings
-simTime = 0.02         # Total simulation time
+simTime = 1         # Total simulation time
 dt = 0.002          # Timestep for discretisation
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 eps = 0.001         # To avoid singular force makig computation instable. 
@@ -137,6 +137,7 @@ randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
+creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations
 
 
 ### Precomputation
@@ -154,7 +155,9 @@ bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a r
 
 creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
 creationCounter = 0
-stepsSinceCreation = np.ones(len(creations)) * -1
+stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
+exceptionSteps = int(creaExc / dt)
+
 
 
 simStartTime = timer.time() #to time simulation length
@@ -179,11 +182,10 @@ for k in range(nrSteps-1):
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs)
     
     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
-        if (0 <= stepsSinceCreation[i] < 10): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
+        if (0 <= stepsSinceCreation[i] < exceptionSteps+1): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
             idx = initialNrParticles + i
-            interactions[:,idx : idx + 2,idx : idx + 2] = -1000 #*= -10/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
-            print(idx)
-            print(interactions[3])
+            # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
+            interactions[idx : idx + 2,idx : idx + 2,:] *= (2*i - exceptionSteps)/exceptionSteps #-1/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
             stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) #deterministic part; treating NaNs as zero
