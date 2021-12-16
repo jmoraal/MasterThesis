@@ -22,23 +22,24 @@ import time as timer
 
 
 ## Example 1:
-boxLength = 1
-initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
-b = np.array([-1, -1, 1, 1, -1]) # Particle charges
-
+# boxLength = 1
+# initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
+# b = np.array([-1, -1, 1, 1, -1]) # Particle charges
 # Creation time, place and 'orientation' (positive/negative charge order):
-creations = np.array([[0.14, 0.5, 1, -1],
-                      [0.3, 0.2, 1, -1],
-                      [0.6, 0.5, 1, -1],
-                      [0.61, 0.1, -1, 1]])
-# Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
-#TODO seems like two creations at exact same time are not yet possible
-
     
 ### Example 2:
+boxLength = 1
+initialPositions = np.array([[0.1], [0.85]]) 
+b= np.array([-1, 1])
+
+
+### Example 3:
 # boxLength = 1
-# initialPositions = np.array([[0.0], [1.0]]) 
-# b= np.array([-1, 1])
+# nrParticles = 10
+# dim = 1
+# initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
+# # 0/1 charges:
+# b = np.random.choice((-1,1),nrParticles)
 
 
 initialNrParticles = np.shape(initialPositions)[0]
@@ -46,16 +47,13 @@ dim = np.shape(initialPositions)[1]
 domain = (0,boxLength)
 
 
-### Example 2:
-# boxLength = 1
-# nrParticles = 6
-# dim = 1
-# initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
-# # 0/1 charges:
-# b = np.random.choice((-1,1),nrParticles)
-# # arbitrary charges in [-1,1]: 
-# b = b * np.random.rand(nrParticles)
-# # b = np.ones(nrParticles)
+creations = np.array([[0.14, 0.5, 1, -1],
+                      [0.3, 0.2, 1, -1],
+                      [0.6, 0.5, 1, -1],
+                      [0.61, 0.1, 1, -1]])
+# Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
+#TODO seems like two creations at exact same time are not yet possible
+# Also, orientation is quite important for whether a creation immediately annihilates or not
 
 
 ### Create grid, e.g. as possible sources: 
@@ -134,12 +132,12 @@ def PeachKoehler(sources, x, b):
 ### Simulation settings
 simTime = 1.5         # Total simulation time
 dt = 0.002          # Timestep for discretisation
-PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 eps = 0.001         # To avoid singular force makig computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
+collTres = 0.008    # Collision threshold; if particles are closer than this, they are considered collided
 creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 
 
@@ -189,7 +187,7 @@ for k in range(nrSteps-1):
         if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
             idx = initialNrParticles + 2 * i
             # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2,:] *= (2*i - exceptionSteps)/exceptionSteps*1.0 #-1/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
+            interactions[idx : idx + 2,idx : idx + 2,:] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
             stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) #deterministic part; treating NaNs as zero
@@ -289,6 +287,7 @@ def plotAnim(bInitial, x):
 
 #1D plot:    
 def plot1D(bInitial, x, endTime, nrCreations): 
+    global pos, x_temp
     plt.clf() # Clears current figure
     
     trajectories = np.ndarray.squeeze(x)
@@ -299,15 +298,20 @@ def plot1D(bInitial, x, endTime, nrCreations):
     nrPoints, nrTrajectories = np.shape(trajectories)
     
     plt.ylim((0,endTime))
-    yAxis = np.linspace(0, endTime, nrPoints)
+    y = np.linspace(0, endTime, nrPoints)
     
     for i in range(nrTrajectories):
-        plt.plot(trajectories[:,i], yAxis, c = colorDict.get(bInitial[i]))
+        #insert NaNs at 'discontinuities':
+        x_current = trajectories[:,i]
+        x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
+        pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1
+        x_new = np.insert(x_current, pos, np.nan)
+        y_new = np.insert(y, pos, np.nan) #insert NaNs in order not to draw jumps across domain caused by PBCs
+        #note that x[pos] = np.nan would work as well, but that would delete data
+        
+        plt.plot(x_new, y_new, c = colorDict.get(bInitial[i]))
 
 #TODO: figure out how to plot trajectories w/ particles jumping sides.
-# Possibility: insert NaN at 'discontinuities': 
-    # pos = np.where(np.abs(np.diff(y)) >= 0.5)[0]+1
-    # x = np.insert(x, pos, np.nan)
-    # y = np.insert(y, pos, np.nan)
+
 
 plot1D(bInitial, x, simTime, nrCreations)
