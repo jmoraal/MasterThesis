@@ -19,41 +19,58 @@ import time as timer
 # import numba
 # from numba import jit #just-in-time compiling. Yet to be implemented...
 
+### Simulation settings
+simTime = 1.5         # Total simulation time
+dt = 0.002          # Timestep for discretisation
+PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+eps = 0.001         # To avoid singular force makig computation instable. 
+randomness = False  # Whether to add random noise to dislocation positions
+sigma = 0.01        # Influence of noise
+sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
+collTres = 0.008    # Collision threshold; if particles are closer than this, they are considered collided
+creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 
 
 ## Example 1:
 # boxLength = 1
 # initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
 # b = np.array([-1, -1, 1, 1, -1]) # Particle charges
-# Creation time, place and 'orientation' (positive/negative charge order):
+# # Creation time, place and 'orientation' (positive/negative charge order):
+# creations = np.array([[0.14, 0.5, 1, -1],
+#                       [0.3, 0.2, 1, -1],
+#                       [0.6, 0.5, 1, -1],
+#                       [0.61, 0.1, 1, -1]])
+# Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
+#TODO seems like two creations at exact same time are not yet possible
+# Also, orientation is quite important for whether a creation immediately annihilates or not
     
+
 ### Example 2:
-boxLength = 1
-initialPositions = np.array([[0.1], [0.85]]) 
-b= np.array([-1, 1])
+# boxLength = 1
+# initialPositions = np.array([[0.1], [0.85]]) 
+# b= np.array([-1, 1])
 
 
 ### Example 3:
-# boxLength = 1
-# nrParticles = 10
-# dim = 1
-# initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
-# # 0/1 charges:
-# b = np.random.choice((-1,1),nrParticles)
+boxLength = 1
+nrParticles = 10
+dim = 1
+initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
+# 0/1 charges:
+b = np.random.choice((-1,1),nrParticles)
+
+nrCreations = 10
+creations = np.zeros((nrCreations,4))
+creations[:,0] = np.linspace(0,0.5*simTime, nrCreations) # times; Last creation at 0.5 simTime to see equilibrium develop
+creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = boxLength) #creaLocs
+creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) #creaOrient 
+
 
 
 initialNrParticles = np.shape(initialPositions)[0]
 dim = np.shape(initialPositions)[1]
 domain = (0,boxLength)
 
-
-creations = np.array([[0.14, 0.5, 1, -1],
-                      [0.3, 0.2, 1, -1],
-                      [0.6, 0.5, 1, -1],
-                      [0.61, 0.1, 1, -1]])
-# Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
-#TODO seems like two creations at exact same time are not yet possible
-# Also, orientation is quite important for whether a creation immediately annihilates or not
 
 
 ### Create grid, e.g. as possible sources: 
@@ -128,17 +145,6 @@ def PeachKoehler(sources, x, b):
     #TODO correct normal vectors (probably not equal for all sources)
 
 # %% SIMULATION
-
-### Simulation settings
-simTime = 1.5         # Total simulation time
-dt = 0.002          # Timestep for discretisation
-PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-eps = 0.001         # To avoid singular force makig computation instable. 
-randomness = False  # Whether to add random noise to dislocation positions
-sigma = 0.01        # Influence of noise
-sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.008    # Collision threshold; if particles are closer than this, they are considered collided
-creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 
 
 ### Precomputation
