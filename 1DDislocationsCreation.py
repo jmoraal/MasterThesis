@@ -27,9 +27,12 @@ initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double bracke
 b = np.array([-1, -1, 1, 1, -1]) # Particle charges
 
 # Creation time, place and 'orientation' (positive/negative charge order):
-creations = np.array([[0.15, 0.5, -1, 1],
-                      [0.3, 0.2, 1, -1]])
+creations = np.array([[0.14, 0.5, 1, -1],
+                      [0.3, 0.2, 1, -1],
+                      [0.6, 0.5, 1, -1],
+                      [0.61, 0.1, -1, 1]])
 # Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
+#TODO seems like two creations at exact same time are not yet possible
 
     
 ### Example 2:
@@ -129,7 +132,7 @@ def PeachKoehler(sources, x, b):
 # %% SIMULATION
 
 ### Simulation settings
-simTime = 1         # Total simulation time
+simTime = 1.5         # Total simulation time
 dt = 0.002          # Timestep for discretisation
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 eps = 0.001         # To avoid singular force makig computation instable. 
@@ -137,7 +140,7 @@ randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations
+creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 
 
 ### Precomputation
@@ -169,7 +172,7 @@ for k in range(nrSteps-1):
         creationLocation = creations[creationCounter][1]
         creationOrder = creations[creationCounter][-2:]
         
-        idx = initialNrParticles + creationCounter
+        idx = initialNrParticles + 2 * creationCounter
         x[k, idx] = np.array([creationLocation - collTres]) # Set location, distance of collision treshold apart
         x[k, idx + 1] = np.array([creationLocation + collTres]) # Array construct is sort of ugly fix, but should make generalisation to 2D easier
         b[idx : idx + 2] = creationOrder # Set charges as specified before. #TODO does not seem to make a difference yet...
@@ -181,11 +184,12 @@ for k in range(nrSteps-1):
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs)
     
+    # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
-        if (0 <= stepsSinceCreation[i] < exceptionSteps+1): #TODO now still arbitrary threshold. Idea: disable forces between new creation initially
-            idx = initialNrParticles + i
+        if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
+            idx = initialNrParticles + 2 * i
             # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2,:] *= (2*i - exceptionSteps)/exceptionSteps #-1/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
+            interactions[idx : idx + 2,idx : idx + 2,:] *= (2*i - exceptionSteps)/exceptionSteps*1.0 #-1/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
             stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) #deterministic part; treating NaNs as zero
