@@ -14,7 +14,7 @@ import time as timer
 
 ### Simulation settings
 simTime = 2         # Total simulation time
-dt = 0.002          # Timestep for discretisation
+dt = 0.001          # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 eps = 0.001         # To avoid singular force makig computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
@@ -55,7 +55,7 @@ def setExample(N):
         # 0/1 charges:
         b = np.random.choice((-1,1),nrParticles)
         
-        nrCreations = 10
+        nrCreations = 5
         creations = np.zeros((nrCreations,4))
         creations[:,0] = np.linspace(0,0.5*simTime, nrCreations) # Creation times; Last creation at 0.5 simTime to see equilibrium develop
         creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = boxLength) # Locations. Needs to be adapted for multi-D
@@ -92,10 +92,10 @@ def pairwiseDistance(x, PBCs = False):
             between all coordinates, optionally w/ PBCs
     """    
     
-    diff = x - x[:,np.newaxis] #difference vectors #2-norm of difference vectors
+    diff = x - x[:,np.newaxis] # Difference vectors #2-norm of difference vectors
     if PBCs:
-        diff = diff - np.floor(0.5 + diff/boxLength)*boxLength #calculate difference vector to closest copy of particle (with correct orientation)
-    dist = np.linalg.norm(diff, axis = 2) #compute length of difference vectors
+        diff = diff - np.floor(0.5 + diff/boxLength)*boxLength # Calculate difference vector to closest copy of particle (with correct orientation)
+    dist = np.linalg.norm(diff, axis = 2) # Compute length of difference vectors
     
     return diff, dist
 
@@ -105,17 +105,28 @@ def kernel(x):
     """ Given array of coordinates, compute log-kernel of particles """
     
     return np.log(pairwiseDistance(x))
-#Idea: eventually give this as argument to `interaction' function. Currently not used
+# Idea: eventually give this as argument to `interaction' function. Currently not used
 
 
-def interaction(diff,dist,b, PBCBool = True):
-    """ Compute array of pairwise particle interactions for given array of particle coordinates and charges """
+def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps', cutoff = np.infty):
+    """ Compute array of pairwise particle interactions for given array of particle coordinates and charges 
     
-    np.fill_diagonal(dist, 1) # Set distance from particle to itself to non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
+    Also returns array of pairwise charge products; not strictly necessary, but speeds up computation
+    """
+    
+    np.fill_diagonal(dist, 1) # Set distance from particle to itself to (aritrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
-    distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+    
+    if regularisation == 'eps': 
+        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+    else: 
+        distCorrected = dist**2
+    
     interactions = 1/len(b) * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis]  #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
+    
+    if regularisation == 'cutoff': 
+        interactions = np.clip(interactions, -cutoff, cutoff) #sets all values outside [-c,c] to value of closest boundary
     
     return interactions, chargeArray
 #TODO: make regularisation (+eps above) variable
@@ -124,7 +135,8 @@ def interaction(diff,dist,b, PBCBool = True):
 def projectParticles(x):
     """Projects particles into box of given size."""
     
-    x = x % boxLength #also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
+    x[np.isfinite(x)] %= boxLength # Also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
+    # Index by isfinite to not affect np.nan (still works otherwise, but gives warning)
 
     return x
 
@@ -237,14 +249,14 @@ print("Simulation duration was ", int(duration/3600), 'hours, ',
 def plotAnim(bInitial, x): 
 
     # only 0/1-values:
-    if (bInitial.dtype == dtype('int32')):
+    if (bInitial.dtype == np.dtype('int32')):
         colorDict = {-1:'red', 0:'grey', 1:'blue'}
         cols = np.vectorize(colorDict.get)(bInitial).tolist() # Convert array of -1/0/1 to red/grey/blue
         #TODO: This way, particles that collide at some point are gray from the beginning...
         #      Can we set colours within update function?
     
     # General values of b, not only 0/1: 
-    if (bInitial.dtype == dtype('float64')):
+    if (bInitial.dtype == np.dtype('float64')):
         n = len(bInitial)
         cols = [0]*n
         
@@ -267,8 +279,6 @@ def plotAnim(bInitial, x):
     time_template = 'time = %.1fs'
     time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
     t_init = 0 # Offset e.g. when disregarding warmup period
-    
-    N = nrParticles
     
     def update(i):
         update.k += 1
