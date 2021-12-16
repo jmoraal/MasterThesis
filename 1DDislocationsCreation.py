@@ -16,11 +16,13 @@ import time as timer
 simTime = 2         # Total simulation time
 dt = 0.001          # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-eps = 0.001         # To avoid singular force makig computation instable. 
+reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff'
+eps = 0.0001           # To avoid singular force makig computation instable. 
+cutoff = 50         # To avoid singular force makig computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.008    # Collision threshold; if particles are closer than this, they are considered collided
+collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 
 
@@ -108,7 +110,7 @@ def kernel(x):
 # Idea: eventually give this as argument to `interaction' function. Currently not used
 
 
-def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps', cutoff = np.infty):
+def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges 
     
     Also returns array of pairwise charge products; not strictly necessary, but speeds up computation
@@ -194,7 +196,7 @@ for k in range(nrSteps-1):
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
-    interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs)
+    interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
