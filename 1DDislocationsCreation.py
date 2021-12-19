@@ -24,7 +24,7 @@ sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
-
+stress = 1          # Constant in 1D case. Needed for creation
 
 def setExample(N): 
     global boxLength, initialPositions, b, creations, dim, domain, initialNrParticles
@@ -138,14 +138,18 @@ def projectParticles(x):
 
 
 
-def PeachKoehler(sources, x, b):
-    """Computes Peach-Koehler force for each source"""
+def PeachKoehler(sources, x, b, stress):
+    """Computes Peach-Koehler force for each source
     
-    f = 0 #TODO (placeholder)
+    (Sources are typically fixed equidistant grid points) """
+    
+    x = np.nan_to_num(x)
+    diff = sources[:,np.newaxis] - x[:] 
+    interactions = -2/diff + stress # According to final expression in meeting notes of 211213
+    f = np.sum(interactions, axis = 1)
     
     return f
-    #TODO correctly implement stress fields (sigma)
-    #TODO correct normal vectors (probably not equal for all sources)
+        
 
 # %% SIMULATION
 
