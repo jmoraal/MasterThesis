@@ -13,21 +13,26 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 2         # Total simulation time
+simTime = 0.2         # Total simulation time
 dt = 0.001          # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.0001           # To avoid singular force makig computation instable. 
-cutoff = 50         # To avoid singular force makig computation instable. 
+eps = 0.0001           # To avoid singular force making computation instable. 
+cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
+manualCrea = False   # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
+autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+forceTres = 0.01    # Threshold for magnitude Peach-Koehler force
+timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
+Lnuc = 0.6*collTres # Distance at which new dipole is introduced
 
 def setExample(N): 
-    global boxLength, initialPositions, b, creations, dim, domain, initialNrParticles
+    global boxLength, initialPositions, b, creations, domain, initialNrParticles
         
     if N == 1: ### Example 1:
         boxLength = 1
@@ -37,7 +42,7 @@ def setExample(N):
     
     if N == 2: ### Example 2:
         boxLength = 1
-        initialPositions = np.array([[0.02], [0.2], [0.8], [0.85], [1]]) # Double brackets for easier generalisation to multiple dimensions
+        initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
         # Creation time, place and 'orientation' (positive/negative charge order):
         creations = np.array([[0.14, 0.5, 1, -1],
@@ -52,8 +57,7 @@ def setExample(N):
     if N == 3: ### Example 3:
         boxLength = 1
         nrParticles = 10
-        dim = 1
-        initialPositions = np.random.uniform(size = (nrParticles, dim), low = 0, high = boxLength)
+        initialPositions = np.random.uniform(size = nrParticles, low = 0, high = boxLength)
         # 0/1 charges:
         b = np.random.choice((-1,1),nrParticles)
         
@@ -64,14 +68,13 @@ def setExample(N):
         creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
     
     # Dependent paramaters (deducable from the ones defined above): 
-    initialNrParticles = np.shape(initialPositions)[0]
-    dim = np.shape(initialPositions)[1]
+    initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
 setExample(3)
 
 ### Create grid, e.g. as possible sources: 
-nrSources = 10
+nrSources = 11
 sources = np.linspace(0,boxLength, nrSources)
 
 
@@ -88,7 +91,7 @@ def pairwiseDistance(x, PBCs = False):
             between all coordinates, optionally w/ PBCs
     """    
     
-    diff = x - x[:,np.newaxis] # Difference vectors #2-norm of difference vectors
+    diff = x - x[:,np.newaxis] # Difference vectors 
     if PBCs:
         diff = diff - np.floor(0.5 + diff/boxLength)*boxLength # Calculate difference vector to closest copy of particle (with correct orientation)
     dist = np.linalg.norm(diff, axis = 2) # Compute length of difference vectors
@@ -144,7 +147,7 @@ def PeachKoehler(sources, x, b, stress):
     (Sources are typically fixed equidistant grid points) """
     
     x = np.nan_to_num(x)
-    diff = sources[:,np.newaxis] - x[:] 
+    diff = sources[:,np.newaxis] - x[:]
     interactions = -2/diff + stress # According to final expression in meeting notes of 211213
     f = np.sum(interactions, axis = 1)
     
@@ -156,22 +159,26 @@ def PeachKoehler(sources, x, b, stress):
 
 ### Precomputation
 nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
-nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
-nrParticles = initialNrParticles + nrCreations 
+if manualCrea: 
+    nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
+    nrParticles = initialNrParticles + nrCreations 
+    creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
+    creationCounter = 0
+    stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
+    exceptionSteps = int(creaExc / dt)
+    b = np.append(b, np.zeros(nrCreations))
+else: nrParticles = initialNrParticles
 
-x = np.zeros((nrSteps, nrParticles, dim))
-x[0,:initialNrParticles,:] = initialPositions
-x[0,initialNrParticles:,:] = np.nan # Effectively keeps particles out of system before creation
+
+x = np.zeros((nrSteps, nrParticles))
+x[0,:initialNrParticles] = initialPositions
+x[0,initialNrParticles:] = np.nan # Effectively keeps particles out of system before creation
 
 bPerTime = np.zeros((nrSteps, nrParticles))
-b = np.append(b, np.zeros(nrCreations))
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
-creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
-creationCounter = 0
-stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
-exceptionSteps = int(creaExc / dt)
-
+if autoCreation: 
+    tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
 
 
 simStartTime = timer.time() # To measure simulation computation time
@@ -180,13 +187,26 @@ simStartTime = timer.time() # To measure simulation computation time
 for k in range(nrSteps-1):
 # while t < simTime
     # Creation: 
-    if (k == creationSteps[creationCounter]): 
+    if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
+        PK = PeachKoehler(sources, x[k+1], b, stress)
+        tresHist += dt #Increment all counters by dt...
+        tresHist[PK < forceTres] = 0 #... and then set those not reaching force threshold to 0
+        creations = np.where(tresHist > timeTres) #identify which sources reached time threshold (automatically reached force threshold too)
+        tresHist[creations] = 0 #reset counters of new creations
+        #TODO check what to do when several sources close to eachother simultaneously reach threshold
+        locsA = sources[creations] - 0.5*Lnuc
+        locsB = sources[creations] + 0.5*Lnuc
+        
+        x = x.append
+        x[k] = np.append(x[k],(locsA,locsB))
+        
+    if manualCrea and (k == creationSteps[creationCounter]): 
         creationLocation = creations[creationCounter][1]
         creationOrder = creations[creationCounter][-2:]
         
         idx = initialNrParticles + 2 * creationCounter
-        x[k, idx] = np.array([creationLocation - collTres]) # Set location, distance of collision treshold apart
-        x[k, idx + 1] = np.array([creationLocation + collTres]) # Array construct is sort of ugly fix, but should make generalisation to 2D easier
+        x[k, idx] = creationLocation - 0.5*Lnuc # Set location, distance of collision treshold apart
+        x[k, idx + 1] = creationLocation + 0.5*Lnuc 
         b[idx : idx + 2] = creationOrder # Set charges as specified before
         
         stepsSinceCreation[creationCounter] = 0
@@ -197,18 +217,20 @@ for k in range(nrSteps-1):
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
-    for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
-        if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
-            idx = initialNrParticles + 2 * i
-            # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2,:] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
-            stepsSinceCreation[i] += 1
+    if not autoCreation:
+        #TODO do we also need this for automatic creations, or is relation w/ sheer stress etc. enough?
+        for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
+            if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
+                idx = initialNrParticles + 2 * i
+                # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
+                interactions[idx : idx + 2,idx : idx + 2,:] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
+                stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) # Deterministic part; treating NaNs as zero
     x[k+1] = x[k] + updates * dt 
     
     if randomness: 
-        random = sigma * np.random.normal(size = (nrParticles,dim)) # 'noise' part
+        random = sigma * np.random.normal(size = nrParticles) # 'noise' part
         x[k+1] += random * np.sqrt(dt) 
     
     if PBCs: 
@@ -228,9 +250,8 @@ for k in range(nrSteps-1):
         
         b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
-        x[k+1, collidedPairs[0]] = np.nan 
+        x[k+1, collidedPairs[0]] = np.nan # Take particles out of system
         x[k+1, collidedPairs[1]] = np.nan 
-        
         
     # t += dt
     
@@ -321,9 +342,6 @@ def plot1D(bInitial, x, endTime, nrCreations):
         # Note that x[pos] = np.nan would work as well, but that would delete data
         
         plt.plot(x_new, y_new, c = colorDict.get(bInitial[i]))
-
-#TODO: figure out how to plot trajectories w/ particles jumping sides.
-
 
 
 plot1D(bInitial, x, simTime, nrCreations)
