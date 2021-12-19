@@ -16,8 +16,8 @@ import time as timer
 simTime = 0.2         # Total simulation time
 dt = 0.001          # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.0001           # To avoid singular force making computation instable. 
+reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
+eps = 0.0001        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
@@ -27,7 +27,7 @@ manualCrea = False   # Whether to include manually appointed dislocation creatio
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
 autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 0.01    # Threshold for magnitude Peach-Koehler force
+forceTres = 50    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = 0.6*collTres # Distance at which new dipole is introduced
 
@@ -94,7 +94,7 @@ def pairwiseDistance(x, PBCs = False):
     diff = x - x[:,np.newaxis] # Difference vectors 
     if PBCs:
         diff = diff - np.floor(0.5 + diff/boxLength)*boxLength # Calculate difference vector to closest copy of particle (with correct orientation)
-    dist = np.linalg.norm(diff, axis = 2) # Compute length of difference vectors
+    dist = np.abs(diff) # Compute length of difference vectors
     
     return diff, dist
 
@@ -121,7 +121,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     else: 
         distCorrected = dist**2
     
-    interactions = 1/len(b) * (-diff / distCorrected[:,:,np.newaxis]) * chargeArray[:,:,np.newaxis]  #len(b) is nr of particles
+    interactions = 1/len(b) * (-diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'cutoff': 
@@ -141,14 +141,19 @@ def projectParticles(x):
 
 
 
-def PeachKoehler(sources, x, b, stress):
+def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     """Computes Peach-Koehler force for each source
     
     (Sources are typically fixed equidistant grid points) """
     
     x = np.nan_to_num(x)
-    diff = sources[:,np.newaxis] - x[:]
-    interactions = -2/diff + stress # According to final expression in meeting notes of 211213
+    dist = np.abs(sources[:,np.newaxis] - x[:]) #TODO include PBCs. Normal dist function does not work here because we have two separate arrays (but may be adapted?)
+    
+    if regularisation == 'eps': 
+        dist = (dist + eps) # Normalise to avoid computational problems at singularity #TODO doubt it is right to use same eps here!
+    
+    
+    interactions = 2/dist + stress # According to final expression in meeting notes of 211213
     f = np.sum(interactions, axis = 1)
     
     return f
@@ -188,17 +193,25 @@ for k in range(nrSteps-1):
 # while t < simTime
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
-        PK = PeachKoehler(sources, x[k+1], b, stress)
-        tresHist += dt #Increment all counters by dt...
-        tresHist[PK < forceTres] = 0 #... and then set those not reaching force threshold to 0
-        creations = np.where(tresHist > timeTres) #identify which sources reached time threshold (automatically reached force threshold too)
-        tresHist[creations] = 0 #reset counters of new creations
-        #TODO check what to do when several sources close to eachother simultaneously reach threshold
-        locsA = sources[creations] - 0.5*Lnuc
-        locsB = sources[creations] + 0.5*Lnuc
-        
-        x = x.append
-        x[k] = np.append(x[k],(locsA,locsB))
+        PK = np.abs(PeachKoehler(sources, x[k+1], b, stress))
+        tresHist[PK >= forceTres] += dt # Increment all counters reaching Peach-Koehler force threshold by dt
+        creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too)
+        nrNewDislocs = len(creations) * 2
+        if nrNewDislocs > 0:
+            tresHist[creations] = 0 # Reset counters of new creations
+            #TODO check what to do when several sources close to eachother simultaneously reach threshold
+            
+            #The following is a bit tedious, should be possible in a simpler way
+            locs = np.zeros(nrNewDislocs)
+            locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
+            locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
+            charges = np.tile([-1,1], len(creations)) # Creates array by repeating given pattern; this way assigns charges
+            
+            x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
+            print(np.shape(x))
+            x[k, -nrNewDislocs:] = locs # replace added NaNs by creation locations for current timestep
+            b = np.append(b, charges)
+            bInitial = np.append(bInitial, charges)
         
     if manualCrea and (k == creationSteps[creationCounter]): 
         creationLocation = creations[creationCounter][1]
@@ -208,6 +221,7 @@ for k in range(nrSteps-1):
         x[k, idx] = creationLocation - 0.5*Lnuc # Set location, distance of collision treshold apart
         x[k, idx + 1] = creationLocation + 0.5*Lnuc 
         b[idx : idx + 2] = creationOrder # Set charges as specified before
+        bInitial[idx : idx + 2] = creationOrder
         
         stepsSinceCreation[creationCounter] = 0
         creationCounter += 1
@@ -244,7 +258,7 @@ for k in range(nrSteps-1):
         # Idea: dist matrix is symmetrical and we don't want the diagonal, so only take entries above diagonal. 
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
-        newDist += 1000*np.tril(np.ones((nrParticles,nrParticles))) # Arbitrary large number, so that effectively all entries on and below diagonal are disregarded
+        newDist += 1000*np.tril(np.ones((len(x[k]),len(x[k])))) # Arbitrary large number, so that effectively all entries on and below diagonal are disregarded
         collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) # Format: ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
         #TODO may want something nicer than this construction... 
         
@@ -318,14 +332,12 @@ def plotAnim(bInitial, x):
 
 
 #1D plot:    
-def plot1D(bInitial, x, endTime, nrCreations): 
+def plot1D(bInitial, x, endTime): 
     global pos, x_temp
     plt.clf() # Clears current figure
     
     trajectories = np.ndarray.squeeze(x)
     colorDict = {-1:'red', 0:'grey', 1:'blue'}
-    bInitial[-nrCreations:] = creations[:,-2:].flatten() 
-    # Set colour of created dislocations according to charge they eventually get (not 0, which they begin with)
     
     nrPoints, nrTrajectories = np.shape(trajectories)
     
@@ -342,6 +354,7 @@ def plot1D(bInitial, x, endTime, nrCreations):
         # Note that x[pos] = np.nan would work as well, but that would delete data
         
         plt.plot(x_new, y_new, c = colorDict.get(bInitial[i]))
+        # Set colour of created dislocations according to charge they eventually get (not 0, which they begin with)
 
 
-plot1D(bInitial, x, simTime, nrCreations)
+plot1D(bInitial, x, simTime)
