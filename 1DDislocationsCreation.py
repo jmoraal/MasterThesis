@@ -14,10 +14,11 @@ import time as timer
 #TODO Add exception on singular force for PK-creation 
 #TODO Find reasonable parameters
 #TODO Use NaNs in position array to be more memory and time efficient (note that dist computation is O(n²)!)
+#TODO make more class-based? May help a lot with readability etc
 
 
 ### Simulation settings
-simTime = 1         # Total simulation time
+simTime = 0.5         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
@@ -26,11 +27,11 @@ cutoff = 50         # To avoid singular force making computation instable.
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-manualCrea = True  # Whether to include manually appointed dislocation creations
+collTres = 0.001    # Collision threshold; if particles are closer than this, they are considered collided
+manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
-autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 600     # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = collTres # Distance at which new dipole is introduced
@@ -205,14 +206,17 @@ for k in range(nrSteps-1):
 # while t < simTime
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
-        PK = np.abs(PeachKoehler(sources, x[k], b, stress))
-        tresHist[PK >= forceTres] += dt # Increment all counters reaching Peach-Koehler force threshold by dt
+        PK = PeachKoehler(sources, x[k], b, stress) #TODO sign indicates orientation of dipole!
+        #TODO visualise PK on plot background
+        tresHist[np.abs(PK) >= forceTres] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
+        tresHist[np.abs(PK) < forceTres] = 0 # Set all others to 0
         creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too)
-        nrNewDislocs = len(creations) * 2
+        nrNewCreations = len(creations)
+        nrNewDislocs = nrNewCreations * 2
         if nrNewDislocs > 0:
             # To keep track of force exception:
-            creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(len(creations))) # Set counters to count down from exceptionSteps
-            creaIdx = np.append(creaIdx, np.arange(len(creations))*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
+            creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(nrNewCreations)) # Set counters to count down from exceptionSteps
+            creaIdx = np.append(creaIdx, np.arange(nrNewCreations)*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
             
             tresHist[creations] = 0 # Reset counters of new creations
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
@@ -221,14 +225,22 @@ for k in range(nrSteps-1):
             locs = np.zeros(nrNewDislocs)
             locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
             locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-            charges = np.tile([-1,1], len(creations)) # Creates array by repeating given pattern; this way assigns charges. #TODO derive orientation in a physical way!
+            charges = np.tile([-1,1], nrNewCreations) # Creates array by repeating given pattern; this way assigns charges. #TODO derive orientation in a physical way!
             
+            charges = np.zeros(nrNewDislocs)
+            
+            for i in range(nrNewCreations):
+                sign = np.sign(PK[creations[i]]) # Index from 'creations' because PK is computed for all sources, not only new creations
+                charges[i] = sign #TODO check sign! Might be other way around
+                charges[i+1] = -sign 
+            
+            #TODO pre-allocate?
             x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
             x[k, -nrNewDislocs:] = locs # replace added NaNs by creation locations for current timestep
             b = np.append(b, charges)
             bInitial = np.append(bInitial, charges)
             
-            
+    #TODO case statement?    
         
     if manualCrea and (k == creationSteps[creationCounter]): 
         creationLocation = creations[creationCounter][1]
@@ -242,6 +254,7 @@ for k in range(nrSteps-1):
         
         stepsSinceCreation[creationCounter] = 0
         creationCounter += 1
+        print(f"Creation {creationCounter} took place")
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
@@ -269,7 +282,7 @@ for k in range(nrSteps-1):
                 stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) # Deterministic part; treating NaNs as zero
-    x[k+1] = x[k] + updates * dt 
+    x[k+1] = x[k] + updates * dt #TODO Include drag coefficient
     
     if randomness: 
         random = sigma * np.random.normal(size = nrParticles) # 'noise' part
@@ -290,10 +303,12 @@ for k in range(nrSteps-1):
         collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) # Format: ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
         #TODO may want something nicer than this construction... 
         
+        
         b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
         x[k+1, collidedPairs[0]] = np.nan # Take particles out of system
         x[k+1, collidedPairs[1]] = np.nan 
+        
         
     # t += dt
     
