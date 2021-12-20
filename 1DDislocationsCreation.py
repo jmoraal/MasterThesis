@@ -17,8 +17,8 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 0.2       # Total simulation time
-dt = 0.001          # Timestep for discretisation
+simTime = 1         # Total simulation time
+dt = 0.0005         # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
 eps = 0.0001        # To avoid singular force making computation instable. 
@@ -27,13 +27,13 @@ randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-manualCrea = False  # Whether to include manually appointed dislocation creations
+manualCrea = True  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
-autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 1000    # Threshold for magnitude Peach-Koehler force
+autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+forceTres = 600     # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
-Lnuc = 0.6*collTres # Distance at which new dipole is introduced
+Lnuc = collTres # Distance at which new dipole is introduced
 
 
 def setExample(N): 
@@ -212,7 +212,7 @@ for k in range(nrSteps-1):
         if nrNewDislocs > 0:
             # To keep track of force exception:
             creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(len(creations))) # Set counters to count down from exceptionSteps
-            creaIdx = np.append(creaIdx, np.array(range(len(creations)))*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
+            creaIdx = np.append(creaIdx, np.arange(len(creations))*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
             
             tresHist[creations] = 0 # Reset counters of new creations
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
@@ -252,11 +252,11 @@ for k in range(nrSteps-1):
         for i in range(len(creaTrackers)): 
             idx = initialNrParticles + 2 * creaIdx[i] # 
             # Idea: make interaction forces transition linearly from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1)
+            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/exceptionSteps # linear transition from opposite force (factor -1) to actual force (1)
         
         creaTrackers -= 1 # Count down at all trackers
-        creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
+        creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         
     
     if manualCrea:
