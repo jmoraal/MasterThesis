@@ -81,7 +81,7 @@ setExample(2)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
-sources = np.linspace(0,boxLength, nrSources)
+sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
 
 
 # %%
@@ -231,8 +231,8 @@ for k in range(nrSteps-1):
             
             for i in range(nrNewCreations):
                 sign = np.sign(PK[creations[i]]) # Index from 'creations' because PK is computed for all sources, not only new creations
-                charges[i] = sign #TODO check sign! Might be other way around
-                charges[i+1] = -sign 
+                charges[i] = -sign #TODO check sign! Might be other way around
+                charges[i+1] = sign 
             
             #TODO pre-allocate?
             x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
