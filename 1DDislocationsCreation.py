@@ -194,7 +194,7 @@ bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a r
 if autoCreation: 
     tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
     creaTrackers = []
-    creaIdx = []
+    creaIdx = np.array([], dtype = 'int64')
     exceptionSteps = int(creaExc / dt)
 
 
@@ -212,7 +212,7 @@ for k in range(nrSteps-1):
         if nrNewDislocs > 0:
             # To keep track of force exception:
             creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(len(creations))) # Set counters to count down from exceptionSteps
-            creaIdx = np.append(creaIdx, np.array(range(len(creations)))+len(x[k])) # Keep track for which dislocations these are
+            creaIdx = np.append(creaIdx, np.array(range(len(creations)))*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
             
             tresHist[creations] = 0 # Reset counters of new creations
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
@@ -221,7 +221,7 @@ for k in range(nrSteps-1):
             locs = np.zeros(nrNewDislocs)
             locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
             locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-            charges = np.tile([-1,1], len(creations)) # Creates array by repeating given pattern; this way assigns charges
+            charges = np.tile([-1,1], len(creations)) # Creates array by repeating given pattern; this way assigns charges. #TODO derive orientation in a physical way!
             
             x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
             x[k, -nrNewDislocs:] = locs # replace added NaNs by creation locations for current timestep
@@ -248,11 +248,15 @@ for k in range(nrSteps-1):
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
-    if autoCreation and len(creaTrackers > 0): 
+    if autoCreation and len(creaTrackers) > 0: 
+        for i in range(len(creaTrackers)): 
+            idx = initialNrParticles + 2 * creaIdx[i] # 
+            # Idea: make interaction forces transition linearly from -1 (opposite) to 1 (actual force)
+            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1)
         
-        creaTrackers -= 1
-        np.delete(creaTrackers, creaTrackers == 0)
-        np.delete(creaIdx, creaTrackers == 0)
+        creaTrackers -= 1 # Count down at all trackers
+        creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
+        creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
         
     
     if manualCrea:
