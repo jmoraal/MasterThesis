@@ -18,7 +18,7 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 0.5         # Total simulation time
+simTime = 0.8         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
@@ -27,14 +27,14 @@ cutoff = 50         # To avoid singular force making computation instable.
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.001    # Collision threshold; if particles are closer than this, they are considered collided
+collTres = 0.004    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
 autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 600     # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
-Lnuc = collTres # Distance at which new dipole is introduced
+Lnuc = 2*collTres # Distance at which new dipole is introduced
 
 
 def setExample(N): 
@@ -210,29 +210,28 @@ for k in range(nrSteps-1):
         #TODO visualise PK on plot background
         tresHist[np.abs(PK) >= forceTres] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
         tresHist[np.abs(PK) < forceTres] = 0 # Set all others to 0
-        creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too)
+        creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
         nrNewCreations = len(creations)
         nrNewDislocs = nrNewCreations * 2
         if nrNewDislocs > 0:
+            tresHist[creations] = 0 # Reset counters of new creations
+            
             # To keep track of force exception:
             creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(nrNewCreations)) # Set counters to count down from exceptionSteps
             creaIdx = np.append(creaIdx, np.arange(nrNewCreations)*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
-            
-            tresHist[creations] = 0 # Reset counters of new creations
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
             
             #The following is a bit tedious, should be possible in a simpler way
             locs = np.zeros(nrNewDislocs)
             locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
             locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-            charges = np.tile([-1,1], nrNewCreations) # Creates array by repeating given pattern; this way assigns charges. #TODO derive orientation in a physical way!
             
             charges = np.zeros(nrNewDislocs)
             
             for i in range(nrNewCreations):
                 sign = np.sign(PK[creations[i]]) # Index from 'creations' because PK is computed for all sources, not only new creations
-                charges[i] = -sign #TODO check sign! Might be other way around
-                charges[i+1] = sign 
+                charges[2*i] = -sign #TODO check sign! Might be other way around
+                charges[2*i+1] = sign 
             
             #TODO pre-allocate?
             x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
