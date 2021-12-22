@@ -82,7 +82,8 @@ setExample(2)
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
 sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
-
+nrBackgrSrc = 300 #Only to plot
+backgrSrc = np.linspace(0,boxLength, nrBackgrSrc)
 
 # %%
 #@jit(nopython=True)
@@ -198,6 +199,7 @@ if autoCreation:
     creaIdx = np.array([], dtype = 'int64')
     exceptionSteps = int(creaExc / dt)
 
+    PKlog = np.zeros((nrSteps, nrBackgrSrc))
 
 simStartTime = timer.time() # To measure simulation computation time
 
@@ -206,8 +208,9 @@ for k in range(nrSteps-1):
 # while t < simTime
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
-        PK = PeachKoehler(sources, x[k], b, stress) #TODO sign indicates orientation of dipole!
-        #TODO visualise PK on plot background
+        PK = PeachKoehler(sources, x[k], b, stress) 
+        PKlog[k,:] = PeachKoehler(backgrSrc, x[k],b,stress) # Save all PK forces to visualise
+
         tresHist[np.abs(PK) >= forceTres] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
         tresHist[np.abs(PK) < forceTres] = 0 # Set all others to 0
         creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
@@ -374,7 +377,7 @@ def plotAnim(bInitial, x):
 
 
 #1D plot:    
-def plot1D(bInitial, x, endTime): 
+def plot1D(bInitial, x, endTime, PK = None): 
     global pos, x_temp
     plt.clf() # Clears current figure
     
@@ -397,6 +400,16 @@ def plot1D(bInitial, x, endTime):
         
         plt.plot(x_new, y_new, c = colorDict.get(bInitial[i]))
         # Set colour of created dislocations according to charge they eventually get (not 0, which they begin with)
+        
+    if not PK is None:
+        # Broadcast timesteps and locations of sources into same size arrays:
+        timeCoord = y[:,np.newaxis] * np.ones(len(PK[0]))
+        locCoord = backgrSrc * np.ones(len(PK))[:,np.newaxis]
+        
+        PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) # Scale to get better colourplot
+        
+        plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
+        #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 
-plot1D(bInitial, x, simTime)
+plot1D(bInitial, x, simTime, PK = PKlog)
