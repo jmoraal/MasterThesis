@@ -18,7 +18,7 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 0.8         # Total simulation time
+simTime = 1         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
@@ -26,15 +26,16 @@ eps = 0.001        # To avoid singular force making computation instable.
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
-sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.002    # Collision threshold; if particles are closer than this, they are considered collided
+sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
+collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
-autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 1000    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres # Distance at which new dipole is introduced
+showBackgr = False 
 
 
 def setExample(N): 
@@ -42,13 +43,13 @@ def setExample(N):
         
     if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
         boxLength = 1
-        initialPositions = np.array([0.3, 0.75]) # Peculiarity: if they are _exactly_ 0.5 apart, PBC distance starts acting up.
+        initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
         b= np.array([1, 1])    
     
     if N == 1: ### Example 1:
         boxLength = 1
-        initialPositions = np.array([0.2, 0.4]) 
-        b= np.array([-1, 1])
+        initialPositions = np.array([0.21, 0.7, 0.8]) 
+        b= np.array([-1, 1, 1])
         
     
     if N == 2: ### Example 2:
@@ -82,7 +83,7 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(0)
+setExample(2)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
@@ -166,11 +167,19 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     dist, diff = pairwiseDistance(x, x2 = sources) 
     
     if regularisation == 'eps': 
+        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+    else: 
+        distCorrected = dist**2
+    
+    interactions = -1/len(b) * (diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
+    interactions = np.nan_to_num(interactions) # Set NaNs to 0
+    
+    if regularisation == 'eps': 
         dist = (dist + eps) # Normalise to avoid computational problems at singularity #TODO doubt it is right to use same eps here!
     
     
     interactions = 2/dist + stress # According to final expression in meeting notes of 211213
-    f = -np.sum(interactions, axis = 1)
+    f = np.sum(interactions, axis = 1)
     
     return f
         
@@ -416,5 +425,7 @@ def plot1D(bInitial, x, endTime, PK = None):
         plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
-
-plot1D(bInitial, x, simTime)#, PK = PKlog)
+if showBackgr: 
+    plot1D(bInitial, x, simTime, PK = PKlog)
+else: 
+    plot1D(bInitial, x, simTime)
