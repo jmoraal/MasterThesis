@@ -22,17 +22,17 @@ simTime = 0.8         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.0001        # To avoid singular force making computation instable. 
+eps = 0.001        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide
-collTres = 0.004    # Collision threshold; if particles are closer than this, they are considered collided
+collTres = 0.002    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
 stress = 1          # Constant in 1D case. Needed for creation
-autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 600     # Threshold for magnitude Peach-Koehler force
+autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+forceTres = 1000    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres # Distance at which new dipole is introduced
 
@@ -40,9 +40,14 @@ Lnuc = 2*collTres # Distance at which new dipole is introduced
 def setExample(N): 
     global boxLength, initialPositions, b, creations, domain, initialNrParticles
         
+    if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
+        boxLength = 1
+        initialPositions = np.array([0.3, 0.75]) # Peculiarity: if they are _exactly_ 0.5 apart, PBC distance starts acting up.
+        b= np.array([1, 1])    
+    
     if N == 1: ### Example 1:
         boxLength = 1
-        initialPositions = np.array([[0.1], [0.85]]) 
+        initialPositions = np.array([0.2, 0.4]) 
         b= np.array([-1, 1])
         
     
@@ -77,13 +82,13 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(2)
+setExample(0)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
 sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
-nrBackgrSrc = 300 #Only to plot
-backgrSrc = np.linspace(0,boxLength, nrBackgrSrc)
+nrBackgrSrc = 100 #Only to plot
+backgrSrc = np.linspace(0,boxLength-1/(nrBackgrSrc - 1), nrBackgrSrc)
 
 # %%
 #@jit(nopython=True)
@@ -132,7 +137,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     else: 
         distCorrected = dist**2
     
-    interactions = 1/len(b) * (-diff / distCorrected) * chargeArray #len(b) is nr of particles
+    interactions = -1/len(b) * (diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'cutoff': 
@@ -165,7 +170,7 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     
     
     interactions = 2/dist + stress # According to final expression in meeting notes of 211213
-    f = np.sum(interactions, axis = 1)
+    f = -np.sum(interactions, axis = 1)
     
     return f
         
@@ -412,4 +417,4 @@ def plot1D(bInitial, x, endTime, PK = None):
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 
-plot1D(bInitial, x, simTime, PK = PKlog)
+plot1D(bInitial, x, simTime)#, PK = PKlog)
