@@ -25,7 +25,7 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 0.6         # Total simulation time
+simTime = 1         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
@@ -154,7 +154,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
         interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
     
     return interactions, chargeArray
-#TODO: make regularisation (+eps above) variable
+#TODO: make regularisation (+eps above) variable (and eventually remove, hopefully)
 
     
 def projectParticles(x):
@@ -179,6 +179,7 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
         distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
     else: 
         distCorrected = dist**2
+    
     
     interactions = -1/len(b) * (diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
@@ -208,7 +209,7 @@ t = 0
 #     exceptionSteps = int(creaExc / dt)
 #     b = np.append(b, np.zeros(nrCreations))
 # else: nrParticles = initialNrParticles
-
+stepSizes = []
 
 trajectories = initialPositions[None,:] # Change shape into (1,len)
 x = np.copy(initialPositions)
@@ -305,8 +306,14 @@ while t < simTime:
     #             interactions[idx : idx + 2,idx : idx + 2] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
     #             stepsSinceCreation[i] += 1
     
+    
+    ## Main update step: 
     updates = np.nansum(interactions,axis = 1) # Deterministic part; treating NaNs as zero
+    dt = min(0.001/np.max(updates), 0.1)
     x_new = x + updates * dt #TODO Include drag coefficient #TODO use scipy odeint-integrator! (adaptive step size)
+    
+    stepSizes.append(dt)
+    
     
     if randomness: 
         random = sigma * np.random.normal(size = len(x)) # 'noise' part
