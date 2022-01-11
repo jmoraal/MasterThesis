@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Tue Jan 11 09:36:14 2022
+
+@author: s161981
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Tue Dec 14 17:41:52 2021
 
 @author: s161981
@@ -18,11 +25,11 @@ import time as timer
 
 
 ### Simulation settings
-simTime = 1         # Total simulation time
+simTime = 0.6         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
-PBCs = True         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.001        # To avoid singular force making computation instable. 
+eps = 0.00        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
@@ -30,11 +37,11 @@ sticky = True       # Whether collisions are sticky, i.e. particles stay togethe
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
-stress = 1          # Constant in 1D case. Needed for creation
+stress = 100          # Constant in 1D case. Needed for creation
 autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 1000    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
-Lnuc = 2*collTres # Distance at which new dipole is introduced
+Lnuc = 2*collTres # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 showBackgr = False 
 
 
@@ -44,12 +51,12 @@ def setExample(N):
     if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
         boxLength = 1
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
-        b= np.array([1, 1])    
+        b = np.array([1, 1])    
     
     if N == 1: ### Example 1:
         boxLength = 1
         initialPositions = np.array([0.21, 0.7, 0.8]) 
-        b= np.array([-1, 1, 1])
+        b = np.array([-1, 1, 1])
         
     
     if N == 2: ### Example 2:
@@ -83,11 +90,13 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(2)
+setExample(1)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
 sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
+# sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
+# nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
 backgrSrc = np.linspace(0,boxLength-1/(nrBackgrSrc - 1), nrBackgrSrc)
 
@@ -188,42 +197,41 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
 
 
 ### Precomputation
-nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
-if manualCrea: 
-    nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
-    nrParticles = initialNrParticles + nrCreations 
-    creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
-    creationCounter = 0
-    stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
-    exceptionSteps = int(creaExc / dt)
-    b = np.append(b, np.zeros(nrCreations))
-else: nrParticles = initialNrParticles
+#nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
+t = 0
+# if manualCrea: 
+#     nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
+#     nrParticles = initialNrParticles + nrCreations 
+#     creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
+#     creationCounter = 0
+#     stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
+#     exceptionSteps = int(creaExc / dt)
+#     b = np.append(b, np.zeros(nrCreations))
+# else: nrParticles = initialNrParticles
 
 
-x = np.zeros((nrSteps, nrParticles))
-x[0,:initialNrParticles] = initialPositions
-x[0,initialNrParticles:] = np.nan # Effectively keeps particles out of system before creation
+trajectories = initialPositions[None,:] # Change shape into (1,len)
+x = np.copy(initialPositions)
+#x[0,initialNrParticles:] = np.nan # Effectively keeps particles out of system before creation
 
-bPerTime = np.zeros((nrSteps, nrParticles))
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
 if autoCreation: 
     tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
     creaTrackers = []
     creaIdx = np.array([], dtype = 'int64')
-    exceptionSteps = int(creaExc / dt)
+    #exceptionSteps = int(creaExc / dt)
 
-    PKlog = np.zeros((nrSteps, nrBackgrSrc))
+    PKlog = np.zeros((0,nrBackgrSrc))
 
 simStartTime = timer.time() # To measure simulation computation time
 
 ### Simulation loop
-for k in range(nrSteps-1):
-# while t < simTime
+while t < simTime: 
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
-        PK = PeachKoehler(sources, x[k], b, stress) 
-        PKlog[k,:] = PeachKoehler(backgrSrc, x[k],b,stress) # Save all PK forces to visualise
+        PK = PeachKoehler(sources, x, b, stress) 
+        PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
 
         tresHist[np.abs(PK) >= forceTres] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
         tresHist[np.abs(PK) < forceTres] = 0 # Set all others to 0
@@ -234,8 +242,8 @@ for k in range(nrSteps-1):
             tresHist[creations] = 0 # Reset counters of new creations
             
             # To keep track of force exception:
-            creaTrackers = np.append(creaTrackers, exceptionSteps * np.ones(nrNewCreations)) # Set counters to count down from exceptionSteps
-            creaIdx = np.append(creaIdx, np.arange(nrNewCreations)*2+len(x[k])) # Keep track for which dislocations these are; keep 1st index of every pair
+            creaTrackers = np.append(creaTrackers, creaExc * np.ones(nrNewCreations)) # Set counters to count down from exceptionSteps
+            creaIdx = np.append(creaIdx, np.arange(nrNewCreations)*2+len(x)) # Keep track for which dislocations these are; keep 1st index of every pair
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
             
             #The following is a bit tedious, should be possible in a simpler way
@@ -250,30 +258,29 @@ for k in range(nrSteps-1):
                 charges[2*i] = -sign #TODO check sign! Might be other way around
                 charges[2*i+1] = sign 
             
-            #TODO pre-allocate?
-            x = np.append(x, np.zeros((nrSteps, nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
-            x[k, -nrNewDislocs:] = locs # replace added NaNs by creation locations for current timestep
+            
+            x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
             b = np.append(b, charges)
-            bInitial = np.append(bInitial, charges)
+            bInitial = np.append(bInitial, charges) #For correct plot colours
             
     #TODO case statement?    
         
-    if manualCrea and (k == creationSteps[creationCounter]): 
-        creationLocation = creations[creationCounter][1]
-        creationOrder = creations[creationCounter][-2:]
+    # if manualCrea and (k == creationSteps[creationCounter]): 
+    #     creationLocation = creations[creationCounter][1]
+    #     creationOrder = creations[creationCounter][-2:]
         
-        idx = initialNrParticles + 2 * creationCounter
-        x[k, idx] = creationLocation - 0.5*Lnuc # Set location, distance of collision treshold apart
-        x[k, idx + 1] = creationLocation + 0.5*Lnuc 
-        b[idx : idx + 2] = creationOrder # Set charges as specified before
-        bInitial[idx : idx + 2] = creationOrder
+    #     idx = initialNrParticles + 2 * creationCounter
+    #     x[k, idx] = creationLocation - 0.5*Lnuc # Set location, distance of collision treshold apart
+    #     x[k, idx + 1] = creationLocation + 0.5*Lnuc 
+    #     b[idx : idx + 2] = creationOrder # Set charges as specified before
+    #     bInitial[idx : idx + 2] = creationOrder
         
-        stepsSinceCreation[creationCounter] = 0
-        creationCounter += 1
-        print(f"Creation {creationCounter} took place")
+    #     stepsSinceCreation[creationCounter] = 0
+    #     creationCounter += 1
+    #     print(f"Creation {creationCounter} took place")
     
     # main forces/interaction: 
-    diff, dist = pairwiseDistance(x[k], PBCs = PBCs)
+    diff, dist = pairwiseDistance(x, PBCs = PBCs)
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
@@ -281,55 +288,58 @@ for k in range(nrSteps-1):
         for i in range(len(creaTrackers)): 
             idx = initialNrParticles + 2 * creaIdx[i] # 
             # Idea: make interaction forces transition linearly from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/exceptionSteps # linear transition from opposite force (factor -1) to actual force (1)
+            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/creaExc # linear transition from opposite force (factor -1) to actual force (1)
         
-        creaTrackers -= 1 # Count down at all trackers
+        creaTrackers -= dt # Count down at all trackers
         creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
         creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         
     
-    if manualCrea:
-        #TODO do we also need this for automatic creations, or is relation w/ sheer stress etc. enough?
-        for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
-            if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
-                idx = initialNrParticles + 2 * i
-                # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
-                interactions[idx : idx + 2,idx : idx + 2] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
-                stepsSinceCreation[i] += 1
+    # if manualCrea:
+    #     #TODO do we also need this for automatic creations, or is relation w/ sheer stress etc. enough?
+    #     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
+    #         if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
+    #             idx = initialNrParticles + 2 * i
+    #             # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
+    #             interactions[idx : idx + 2,idx : idx + 2] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
+    #             stepsSinceCreation[i] += 1
     
     updates = np.nansum(interactions,axis = 1) # Deterministic part; treating NaNs as zero
-    x[k+1] = x[k] + updates * dt #TODO Include drag coefficient
+    x_new = x + updates * dt #TODO Include drag coefficient #TODO use scipy odeint-integrator! (adaptive step size)
     
     if randomness: 
-        random = sigma * np.random.normal(size = nrParticles) # 'noise' part
-        x[k+1] += random * np.sqrt(dt) 
+        random = sigma * np.random.normal(size = len(x)) # 'noise' part
+        x_new += random * np.sqrt(dt) 
     
     if PBCs: 
-        x[k+1] = projectParticles(x[k+1]) # Places particles back into box
+        x_new = projectParticles(x_new) # Places particles back into box
     
     
     if sticky: 
-        newDist = np.nan_to_num(pairwiseDistance(x[k+1], PBCs = PBCs)[1], nan = 1000) #TODO work around this, really don't want to calculate all distances twice!
+        newDist = np.nan_to_num(pairwiseDistance(x_new, PBCs = PBCs)[1], nan = 1000) #TODO work around this, really don't want to calculate all distances twice!
         # Sets nan to arbitrary large number
         
-        # Idea: dist matrix is symmetrical and we don't want the diagonal, so only take entries above diagonal. 
+        # Idea: dist matrix is symmetric and we don't want the diagonal, so only take entries above diagonal. 
         #       need to compare to threshold, so np.triu does not work since all others are set to 0
         #       so set everything on and below diagonal to arbitrary large value
-        newDist += 1000*np.tril(np.ones((len(x[k]),len(x[k])))) # Arbitrary large number, so that effectively all entries on and below diagonal are disregarded
+        newDist += 1000*np.tril(np.ones((len(x_new),len(x_new)))) # Arbitrary large number, so that effectively all entries on and below diagonal are disregarded #TODO should this be x or x_new?
         collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) # Format: ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
         #TODO may want something nicer than this construction... 
         
         
         b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
-        x[k+1, collidedPairs[0]] = np.nan # Take particles out of system
-        x[k+1, collidedPairs[1]] = np.nan 
+        x_new[collidedPairs[0]] = np.nan # Take particles out of system
+        x_new[collidedPairs[1]] = np.nan 
         
-        
-    # t += dt
     
-    if(k % int(nrSteps/10) == 0):
-        print(f"{k} / {nrSteps}")
+    trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
+    trajectories = np.append(trajectories, x, axis = 0)
+    
+    t += dt
+    
+    if((10*t/simTime) % 1 < 0.0005):
+        print(f"{t} / {simTime}")
 
 
 duration = timer.time() - simStartTime
@@ -340,8 +350,9 @@ print("Simulation duration was ", int(duration/3600), 'hours, ',
 
 # %%
 ### Plot animation ###
-def plotAnim(bInitial, x): 
-
+def plotAnim(bInitial, trajectories): 
+    nrSteps = len(trajectories)
+    
     # only 0/1-values:
     if (bInitial.dtype == np.dtype('int32')):
         colorDict = {-1:'red', 0:'grey', 1:'blue'}
@@ -367,7 +378,7 @@ def plotAnim(bInitial, x):
     
     fig = plt.figure()
     ax = plt.axes(xlim=domain[0], ylim=domain[1])
-    scat = ax.scatter(x[0,:,0], x[0,:,1], c = cols) 
+    scat = ax.scatter(trajectories[0,:,0], trajectories[0,:,1], c = cols) 
     
     
     time_template = 'time = %.1fs'
@@ -376,8 +387,8 @@ def plotAnim(bInitial, x):
     
     def update(i):
         update.k += 1
-        xs = x[i,:,0]
-        ys = x[i,:,1]
+        xs = trajectories[i,:,0]
+        ys = trajectories[i,:,1]
         predata = np.array([xs,ys])
         data = np.transpose(predata)
         scat.set_offsets(data)
@@ -391,11 +402,11 @@ def plotAnim(bInitial, x):
 
 
 #1D plot:    
-def plot1D(bInitial, x, endTime, PK = None): 
+def plot1D(bInitial, trajectories, endTime, PK = None): 
     global pos, x_temp
     plt.clf() # Clears current figure
     
-    trajectories = np.ndarray.squeeze(x)
+    trajectories = np.ndarray.squeeze(trajectories)
     colorDict = {-1:'red', 0:'grey', 1:'blue'}
     
     nrPoints, nrTrajectories = np.shape(trajectories)
@@ -426,6 +437,6 @@ def plot1D(bInitial, x, endTime, PK = None):
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 if showBackgr: 
-    plot1D(bInitial, x, simTime, PK = PKlog)
+    plot1D(bInitial, trajectories, simTime, PK = PKlog)
 else: 
-    plot1D(bInitial, x, simTime)
+    plot1D(bInitial, trajectories, simTime)
