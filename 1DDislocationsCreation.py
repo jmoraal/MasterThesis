@@ -90,7 +90,7 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(1)
+setExample(2)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
@@ -262,6 +262,7 @@ while t < simTime:
             x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
             b = np.append(b, charges)
             bInitial = np.append(bInitial, charges) #For correct plot colours
+            trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
             
     #TODO case statement?    
         
@@ -333,12 +334,13 @@ while t < simTime:
         x_new[collidedPairs[1]] = np.nan 
         
     
-    trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
-    trajectories = np.append(trajectories, x, axis = 0)
+    trajectories = np.append(trajectories, x_new[None,:], axis = 0)
+    
+    x = x_new
     
     t += dt
     
-    if((10*t/simTime) % 1 < 0.0005):
+    if((10*t/simTime) % 1 < dt/100):
         print(f"{t} / {simTime}")
 
 
