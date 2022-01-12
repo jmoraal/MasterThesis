@@ -16,6 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import time as timer
+from scipy.integrate import solve_ivp
 
 ### Main todos
 #TODO Add exception on singular force for PK-creation 
