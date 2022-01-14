@@ -17,26 +17,11 @@ from scipy.integrate import solve_ivp
 
 
 ### Simulation settings
-simTime = 10         # Total simulation time
-dt = 0.0005         # Timestep for discretisation
+simTime = 1000         # Total simulation time
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.0001        # To avoid singular force making computation instable. 
-cutoff = 50         # To avoid singular force making computation instable. 
-randomness = False  # Whether to add random noise to dislocation positions
-sigma = 0.01        # Influence of noise
-sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
-collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-manualCrea = False  # Whether to include manually appointed dislocation creations
-creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
-stress = 100          # Constant in 1D case. Needed for creation
-autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 1000    # Threshold for magnitude Peach-Koehler force
-timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
-Lnuc = 2*collTres # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
-showBackgr = False 
-autoSolve = True
-
+reg = 'cutoff'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
+eps = 0.01        # To avoid singular force making computation instable. 
+boxLength = 6
 
 def setExample(N, boxLen = 1): 
     global boxLength, initialPositions, b, creations, domain, initialNrParticles
@@ -63,7 +48,7 @@ def setExample(N, boxLen = 1):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(100)
+setExample(100, boxLen = boxLength)
 
 ### Create grid, e.g. as possible sources: 
 # nrSources = 11
@@ -100,27 +85,27 @@ def pairwiseDistance(x1, PBCs = True, x2 = None):
 
 
 
-def f(t,x, regularisation = 'eps'):
+def f(t,x, regularisation = 'eps', PBCs = False):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges """
     
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
-    np.fill_diagonal(dist, 1) # Set distance from particle to itself to (aritrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
+    np.fill_diagonal(dist, 1) # Set distance from particle to itself to (arbitrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
     
     if regularisation == 'eps': 
-        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
     else: 
         distCorrected = dist**2
     
     
-    interactions = -1/len(b) * (diff / distCorrected) * chargeArray #len(b) is nr of particles
+    interactions = -(diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'V1': 
         interactions[dist < eps] = diff/eps**2
     
     if regularisation == 'cutoff': 
-        interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
+        interactions = np.clip(interactions, -1/eps, 1/eps) # Sets all values outside [-c,c] to value of closest boundary
     
     updates = np.nansum(interactions,axis = 1) 
     
@@ -135,37 +120,6 @@ def projectParticles(x):
     return x
 
 
-
-def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
-    """Computes Peach-Koehler force for each source
-    
-    (Sources are typically fixed equidistant grid points) """
-    
-    x = np.nan_to_num(x)
-    dist, diff = pairwiseDistance(x, x2 = sources) 
-    
-    if regularisation == 'eps': 
-        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
-    else: 
-        distCorrected = dist**2
-    
-    
-    interactions = -1/len(b) * (diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
-    interactions = np.nan_to_num(interactions) # Set NaNs to 0
-    
-    if regularisation == 'V1': 
-        interactions[dist < eps] = diff/eps**2
-    
-    if regularisation == 'eps': 
-        dist = (dist + eps) # Normalise to avoid computational problems at singularity #TODO doubt it is right to use same eps here!
-    
-    
-    interactions = 2/dist + stress # According to final expression in meeting notes of 211213
-    f = np.sum(interactions, axis = 1)
-    
-    return f
-        
-
 # %% SIMULATION
 
 simStartTime = timer.time() # To measure simulation computation time
@@ -179,42 +133,7 @@ print("Simulation duration was ", int(duration/3600), 'hours, ',
                                   int(duration%60), "seconds")  
 
 
-# %%
-
-#1D plot:    
-def plot1D(bInitial, trajectories, endTime, PK = None): 
-    global pos, x_temp
-    plt.clf() # Clears current figure
-    
-    trajectories = np.ndarray.squeeze(trajectories)
-    colorDict = {-1:'red', 0:'grey', 1:'blue'}
-    
-    nrPoints, nrTrajectories = np.shape(trajectories)
-    
-    plt.ylim((0,endTime))
-    y = np.linspace(0, endTime, nrPoints)
-    
-    for i in range(nrTrajectories):
-        #insert NaNs at 'discontinuities':
-        x_current = trajectories[:,i]
-        x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
-        pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1
-        x_new = np.insert(x_current, pos, np.nan)
-        y_new = np.insert(y, pos, np.nan) # Insert NaNs in order not to draw jumps across domain caused by PBCs
-        # Note that x[pos] = np.nan would work as well, but that would delete data
-        
-        plt.plot(x_new, y_new, c = colorDict.get(bInitial[i]))
-        # Set colour of created dislocations according to charge they eventually get (not 0, which they begin with)
-        
-    # if not PK is None:
-    #     # Broadcast timesteps and locations of sources into same size arrays:
-    #     timeCoord = y[:,np.newaxis] * np.ones(len(PK[0]))
-    #     locCoord = backgrSrc * np.ones(len(PK))[:,np.newaxis]
-        
-    #     PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) # Scale to get better colourplot
-        
-    #     plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
-    #     #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
+# %% Visualisation: 
 
 def plotODESol(solution, charges, log = False): 
     plt.clf()
@@ -224,9 +143,12 @@ def plotODESol(solution, charges, log = False):
     colorDict = {-1:'red', 0:'grey', 1:'blue'}
     nrParticles = len(x[0])
     plt.ylim((0,t[-1]))
-    plt.xlim((0,boxLength))
+    plt.xlim((np.min(x),np.max(x)))
     if log: 
+        t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
         plt.yscale('log')
+        plt.ylim((1e-6,t[-1])) 
+    
     
     for i in range(nrParticles) : 
         x_current = x[:,i]
@@ -240,4 +162,4 @@ def plotODESol(solution, charges, log = False):
         
     plt.show()
 
-plotODESol(sol, b)#, log = True)
+plotODESol(sol, b, log = True)
