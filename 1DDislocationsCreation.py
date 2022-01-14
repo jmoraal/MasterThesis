@@ -26,11 +26,11 @@ from scipy.integrate import solve_ivp
 
 
 ### Simulation settings
-simTime = 3         # Total simulation time
+simTime = 100         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15) or 'cutoff' 
-eps = 0.00        # To avoid singular force making computation instable. 
+eps = 0.001        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
@@ -195,7 +195,7 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
         distCorrected = dist**2
     
     
-    interactions = -1/len(b) * (diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
+    interactions = -(diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'eps': 
@@ -224,6 +224,7 @@ t = 0
 #     b = np.append(b, np.zeros(nrCreations))
 # else: nrParticles = initialNrParticles
 stepSizes = []
+times = [0]
 
 trajectories = initialPositions[None,:] # Change shape into (1,len)
 x = np.copy(initialPositions)
@@ -299,6 +300,7 @@ while t < simTime:
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
+        
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
     if autoCreation and len(creaTrackers) > 0: 
         for i in range(len(creaTrackers)): 
@@ -323,10 +325,13 @@ while t < simTime:
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
-    # dt = min(0.0001/np.max(updates), 0.0001)
+    dt = min(0.001/np.max(updates), 0.01)
     x_new = x + drag * updates * dt #TODO use scipy odeint-integrator! 
     
     stepSizes.append(dt)
+    if np.isnan(x_new.all()):
+        print('No dislocations left')
+        break
     
     
     if randomness: 
@@ -358,10 +363,10 @@ while t < simTime:
     trajectories = np.append(trajectories, x_new[None,:], axis = 0)
     
     x = x_new
-    
     t += dt
+    times.append(t)
     
-    if((10*t/simTime) % 1 < 1e-8):
+    if((10*t/simTime) % 1 < 1e-6):
         print(f"{t} / {simTime}")
 
 
@@ -425,7 +430,7 @@ def plotAnim(bInitial, trajectories):
 
 
 #1D plot:    
-def plot1D(bInitial, trajectories, endTime, PK = None): 
+def plot1D(bInitial, trajectories, t, PK = None, log = False): 
     global pos, x_temp
     plt.clf() # Clears current figure
     
@@ -434,8 +439,14 @@ def plot1D(bInitial, trajectories, endTime, PK = None):
     
     nrPoints, nrTrajectories = np.shape(trajectories)
     
-    plt.ylim((0,endTime))
-    y = np.linspace(0, endTime, nrPoints)
+    y = t
+    plt.ylim((0,t[-1]))
+    
+    if log: 
+        t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
+        plt.yscale('log')
+        plt.ylim((t[0],t[-1])) 
+    
     
     for i in range(nrTrajectories):
         #insert NaNs at 'discontinuities':
@@ -460,6 +471,6 @@ def plot1D(bInitial, trajectories, endTime, PK = None):
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 if showBackgr: 
-    plot1D(bInitial, trajectories, simTime, PK = PKlog)
+    plot1D(bInitial, trajectories, times, PK = PKlog)
 else: 
-    plot1D(bInitial, trajectories, simTime)
+    plot1D(bInitial, trajectories, times, log = True)
