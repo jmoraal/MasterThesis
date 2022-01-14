@@ -26,10 +26,10 @@ from scipy.integrate import solve_ivp
 
 
 ### Simulation settings
-simTime = 1         # Total simulation time
+simTime = 3         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
+reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15) or 'cutoff' 
 eps = 0.00        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
@@ -38,11 +38,12 @@ sticky = True       # Whether collisions are sticky, i.e. particles stay togethe
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed dislocation creations
 creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
-stress = 100          # Constant in 1D case. Needed for creation
-autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+stress = 5          # Constant in 1D case. Needed for creation
+autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 1000    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
+drag = 1
 showBackgr = False 
 
 
@@ -52,7 +53,7 @@ def setExample(N):
     if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
         boxLength = 1
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
-        b = np.array([1, 1])    
+        b = np.array([1, -1])    
     
     if N == 1: ### Example 1:
         boxLength = 1
@@ -87,11 +88,20 @@ def setExample(N):
         creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = boxLength) # Locations. Needs to be adapted for multi-D
         creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
     
+    else: 
+        boxLength = int(N/50)
+        initialPositions = np.random.uniform(size = N, low = 0, high = boxLength)
+        #charges:
+        b = np.ones(N)
+        neg = np.random.choice(range(N),N//2, replace=False)
+        b[neg] = -1
+    
+    
     # Dependent paramaters (deducable from the ones defined above): 
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(2)
+setExample(100)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
@@ -144,12 +154,15 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
     
     if regularisation == 'eps': 
-        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
     else: 
         distCorrected = dist**2
     
     interactions = -1/len(b) * (diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
+    
+    if regularisation == 'V1': 
+        interactions[dist < eps] = diff/eps**2
     
     if regularisation == 'cutoff': 
         interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
@@ -177,7 +190,7 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     dist, diff = pairwiseDistance(x, x2 = sources) 
     
     if regularisation == 'eps': 
-        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
     else: 
         distCorrected = dist**2
     
@@ -309,9 +322,9 @@ while t < simTime:
     
     
     ## Main update step: 
-    updates = np.nansum(interactions,axis = 1) # Deterministic part; treating NaNs as zero
-    dt = min(0.001/np.max(updates), 0.1)
-    x_new = x + updates * dt #TODO Include drag coefficient #TODO use scipy odeint-integrator! (adaptive step size)
+    updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
+    # dt = min(0.0001/np.max(updates), 0.0001)
+    x_new = x + drag * updates * dt #TODO use scipy odeint-integrator! 
     
     stepSizes.append(dt)
     
@@ -348,7 +361,7 @@ while t < simTime:
     
     t += dt
     
-    if((10*t/simTime) % 1 < dt/100):
+    if((10*t/simTime) % 1 < 1e-8):
         print(f"{t} / {simTime}")
 
 

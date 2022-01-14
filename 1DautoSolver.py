@@ -17,11 +17,11 @@ from scipy.integrate import solve_ivp
 
 
 ### Simulation settings
-simTime = 1         # Total simulation time
+simTime = 10         # Total simulation time
 dt = 0.0005         # Timestep for discretisation
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 5e-7        # To avoid singular force making computation instable. 
+eps = 0.0001        # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
@@ -63,7 +63,7 @@ def setExample(N, boxLen = 1):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(6)
+setExample(100)
 
 ### Create grid, e.g. as possible sources: 
 # nrSources = 11
@@ -100,17 +100,27 @@ def pairwiseDistance(x1, PBCs = True, x2 = None):
 
 
 
-def f(t,x):
+def f(t,x, regularisation = 'eps'):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges """
     
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     np.fill_diagonal(dist, 1) # Set distance from particle to itself to (aritrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
     
-    distCorrected = dist**2 + eps
+    if regularisation == 'eps': 
+        distCorrected = (dist**2 + eps) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+    else: 
+        distCorrected = dist**2
+    
     
     interactions = -1/len(b) * (diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
+    
+    if regularisation == 'V1': 
+        interactions[dist < eps] = diff/eps**2
+    
+    if regularisation == 'cutoff': 
+        interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
     
     updates = np.nansum(interactions,axis = 1) 
     
@@ -142,6 +152,9 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     
     interactions = -1/len(b) * (diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
+    
+    if regularisation == 'V1': 
+        interactions[dist < eps] = diff/eps**2
     
     if regularisation == 'eps': 
         dist = (dist + eps) # Normalise to avoid computational problems at singularity #TODO doubt it is right to use same eps here!
@@ -203,7 +216,7 @@ def plot1D(bInitial, trajectories, endTime, PK = None):
     #     plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
     #     #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
-def plotODESol(solution, charges): 
+def plotODESol(solution, charges, log = False): 
     plt.clf()
     t = sol.t
     x = np.transpose(sol.y)
@@ -212,8 +225,10 @@ def plotODESol(solution, charges):
     nrParticles = len(x[0])
     plt.ylim((0,t[-1]))
     plt.xlim((0,boxLength))
+    if log: 
+        plt.yscale('log')
     
-    for i in range(nrParticles) :
+    for i in range(nrParticles) : 
         x_current = x[:,i]
         x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
         pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1
@@ -224,3 +239,5 @@ def plotODESol(solution, charges):
         plt.plot(x_new, t_new, c = colorDict.get(b[i]))
         
     plt.show()
+
+plotODESol(sol, b)#, log = True)
