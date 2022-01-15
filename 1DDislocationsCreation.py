@@ -16,21 +16,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import time as timer
-from scipy.integrate import solve_ivp
 
 ### Main todos
-#TODO Add exception on singular force for PK-creation 
+#TODO Implement better integration scheme! Currently use forward Euler (originating from stochastic SDE approach) with improvised adaptive timestep
 #TODO Find reasonable parameters
 #TODO Use NaNs in position array to be more memory and time efficient (note that dist computation is O(n²)!)
 #TODO make more class-based? May help a lot with readability etc
+#TODO make sticky collisions faster! Now very inefficient
 
 
 ### Simulation settings
-simTime = 100         # Total simulation time
+simTime = 100       # Total simulation time
 dt = 0.0005         # Timestep for discretisation
-PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15) or 'cutoff' 
-eps = 0.001        # To avoid singular force making computation instable. 
+eps = 0.01          # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
 sigma = 0.01        # Influence of noise
@@ -42,7 +42,7 @@ stress = 5          # Constant in 1D case. Needed for creation
 autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
 forceTres = 1000    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
-Lnuc = 2*collTres # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
+Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1
 showBackgr = False 
 
@@ -136,14 +136,6 @@ def pairwiseDistance(x1, PBCs = True, x2 = None):
     return diff, dist
 
 
-
-def kernel(x): 
-    """ Given array of coordinates, compute log-kernel of particles """
-    
-    return np.log(pairwiseDistance(x))
-# Idea: eventually give this as argument to `interaction' function. Currently not used
-
-
 def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     """ Compute array of pairwise particle interactions for given array of particle coordinates and charges 
     
@@ -158,7 +150,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     else: 
         distCorrected = dist**2
     
-    interactions = -1/len(b) * (diff / distCorrected) * chargeArray #len(b) is nr of particles
+    interactions = -(diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'V1': 
@@ -168,7 +160,6 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
         interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
     
     return interactions, chargeArray
-#TODO: make regularisation (+eps above) variable (and eventually remove, hopefully)
 
     
 def projectParticles(x):
@@ -329,7 +320,7 @@ while t < simTime:
     x_new = x + drag * updates * dt #TODO use scipy odeint-integrator! 
     
     stepSizes.append(dt)
-    if np.isnan(x_new.all()):
+    if np.isnan(x_new).all():
         print('No dislocations left')
         break
     
