@@ -15,10 +15,10 @@ from scipy.integrate import solve_ivp
 simTime = 1000         # Total simulation time
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
-eps = 0.001        # To avoid singular force making computation instable. 
-collTres = 0.001
-boxLength = 1
+eps = 0.01        # To avoid singular force making computation instable. 
+boxLength = 5
 annihilation = True
+collTres = 0.001
 
 
 def setExample(N, boxLen = 1): 
@@ -51,7 +51,8 @@ def setExample(N, boxLen = 1):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(1)#00, boxLen = boxLength)
+
+setExample(100, boxLen = boxLength)
 
 # To plot: 
 bInitial = np.copy(b)
@@ -99,7 +100,7 @@ def f(t,x, regularisation = 'eps', PBCs = False):
     updates global parameters b and annTimes 
     
     t is dummy argument used by ODE solver"""
-    
+    global b2
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     np.fill_diagonal(dist, 1) # Set distance from particle to itself to (arbitrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
@@ -123,10 +124,16 @@ def f(t,x, regularisation = 'eps', PBCs = False):
     updates = np.nansum(interactions,axis = 1) 
     
     if annihilation: 
-        bOld = np.copy(b) #to compare below, seeing whether annihilation happened this timestep
-        b[np.where((dist < collTres) * (chargeArray == -1))[0]] = 0 #so that only close and opposite-charged particles annihilate. * works as 'and'-operator for boolean (1/0) arrays
+        annIdx = np.where((dist < collTres) * (chargeArray == -1))[0]
+        b[annIdx] = 0 #so that only close and opposite-charged particles annihilate. * works as 'and'-operator for boolean (1/0) arrays
         #TODO does not properly cover the case where e.g. three dislocations are close; then now, all annihilate (wrongly)
-        annTimes[bOld != b] = t #save for plotting
+        annTimes[annIdx] = t #save for plotting
+        
+        # bOld = np.copy(b) #to compare below, seeing whether annihilation happened this timestep
+        # b[np.where((dist < collTres) * (chargeArray == -1))[0]] = 0 #so that only close and opposite-charged particles annihilate. * works as 'and'-operator for boolean (1/0) arrays
+        # #TODO does not properly cover the case where e.g. three dislocations are close; then now, all annihilate (wrongly)
+        # annTimes[bOld != b] = t #save for plotting
+        
         
     return updates
 
@@ -181,16 +188,28 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
     
     
     for i in range(nrParticles) : 
-        t_current = t[t < annTimes[i]]
-        x_current = x[:len(t_current),i]
-        x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
-        pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1
-        x_new = np.insert(x_current, pos, np.nan)
-        t_new = np.insert(t_current, pos, np.nan) # Insert NaNs in order not to draw jumps across domain caused by PBCs
-        # Note that x[pos] = np.nan would work as well, but that would delete data
+        if annihilationTimes is None: 
+            t_current = t
+            x_current = x[:,i]
+        else: 
+            t_current = t[t < annTimes[i]]
+            x_current = x[:len(t_current),i]
+        
+        if PBCs: 
+            x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
+            pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1
+            x_new = np.insert(x_current, pos, np.nan)
+            t_new = np.insert(t_current, pos, np.nan) # Insert NaNs in order not to draw jumps across domain caused by PBCs
+            # Note that x[pos] = np.nan would work as well, but that would delete data
+        else: 
+            x_new = x_current
+            t_new = t_current
         
         plt.plot(x_new, t_new, c = colorDict.get(charges[i]))
         
     plt.show()
 
-plotODESol(sol, bInitial, log = True)
+if annihilation: 
+    plotODESol(sol, bInitial, log = True, annihilationTimes=annTimes)
+else: 
+    plotODESol(sol, bInitial, log = True)
