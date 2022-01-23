@@ -17,7 +17,7 @@ PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. s
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
 eps = 0.01        # To avoid singular force making computation instable. 
 boxLength = 5
-annihilation = True
+annihilation = False
 collTres = 0.001
 
 
@@ -155,7 +155,7 @@ def projectParticles(x):
 simStartTime = timer.time() # To measure simulation computation time
 
 ### Simulation loop
-sol = solve_ivp(f, [0, simTime], initialPositions, method = 'BDF') #BDF is best for problems that may be stiff
+sol = solve_ivp(f, [0, simTime], initialPositions, method = 'BDF', max_step = 0.1) #BDF is best for problems that may be stiff
 
 
 duration = timer.time() - simStartTime
