@@ -164,7 +164,8 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
 tmin = 0.2
 tmax = 1
 M = 100
-method = 'root'  # or 'fsolve'
+method = 'root'  #very slow, but seems accurate
+method = 'fsolve' # fast but error-prone
 
 ts = np.linspace(tmin, tmax, M)
 Fzeros = np.zeros(M)*np.nan
