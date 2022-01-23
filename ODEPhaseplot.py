@@ -7,8 +7,10 @@ Created on Fri Jan 21 10:57:01 2022
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.integrate import odeint
 from scipy.integrate import solve_ivp
+from scipy.stats import describe
+from scipy.optimize import fsolve
+from scipy.optimize import root
 
 
 F = 1
@@ -18,7 +20,7 @@ rmax = 1.0
 tmax = 2.5
 
 
-### (Adapted) Creation ODE and 'creation exception function' gamma: 
+#%% (Adapted) Creation ODE and 'creation exception function' gamma: 
 def gamma(t, texc = texc):
     return min(2*t/texc - 1, 1)
     # if t < texc: 
@@ -32,13 +34,14 @@ def f(t, R, gamma = gamma, F = F):
 
 
 
-    
-### Plot inherent boundaries
+#%% Plots: 
+
+### Plot inherent boundaries and system constants
 def plotFeatures(): 
-    global thres
+    # global thres
     
     plt.clf()
-    thres = 1/(2*F**2)
+    # thres = 1/(2*F**2)
     # plt.hlines(thres, 0.5, tmax, linestyles = 'dashed')
     plt.vlines(texc, rmin, 10*rmax, linestyles = 'dotted') #vertical line at t = texc
     
@@ -59,16 +62,23 @@ def plotFeatures():
 def fprime(t, R): 
     return -f(texc - t, R)
 
-def plotCritical(): 
-    global critR
+
+def critical(F, texc = texc, plot = False): 
+    global critR, thres
     
-    boundSol1 = solve_ivp(f, [texc, tmax], [thres], method = 'BDF', max_step = 5e-2) 
-    boundSol2 = solve_ivp(fprime, [0, texc], [thres], method = 'BDF', max_step = 5e-2) 
-    plt.plot(boundSol1.t,np.squeeze(boundSol1.y), color = 'black')
-    plt.plot(texc - boundSol2.t,np.squeeze(boundSol2.y), color = 'black') # 'invert' ODE to solve backwards to t=0
+    thres = np.reshape(1/(2*F**2), (1,)) # Reshape is technicality, to account both for case where F is given as 'c' or '[c]'
     
+    boundSol2 = solve_ivp(fprime, [0, texc], thres, method = 'BDF', max_step = 5e-2) 
     critR = boundSol2.y[0][-1]
-    print(f"Critical initial condition: R = {critR}" )
+    
+    if plot: 
+        boundSol1 = solve_ivp(f, [texc, tmax], [np.squeeze(thres)], method = 'BDF', max_step = 5e-2) 
+        plt.plot(boundSol1.t,np.squeeze(boundSol1.y), color = 'black')
+        plt.plot(texc - boundSol2.t,np.squeeze(boundSol2.y), color = 'black') # 'invert' ODE to solve backwards to t=0
+        
+        print(f"Critical initial condition: R = {critR}" )
+    
+    return critR
 
 
 
@@ -109,8 +119,84 @@ def plotPhaseVF():
 
 def plotAll(): 
     plotFeatures()
-    plotCritical()
+    critical(F, plot = True)
     plotSols()
     plotPhaseVF()
+
+
+# plotAll()
+
+#%% More critical-value analysis: critical initial value for R, varying F and texc
+Fmin = 0.2
+Fmax = 3
+N = 100
+
+tmin = 0.2
+tmax = 1
+M = 5
+
+def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True): 
+    plt.clf() # Clears current figure
+    
+    Fs = np.linspace(Fmin, Fmax, N)
+    ts = np.linspace(tmin, tmax, M)
+    crits = np.zeros((M,N))
+    for j in range(M): 
+        texc = ts[j]
+        for i in range(N): 
+            crits[j,i] = critical(Fs[i], texc = texc)
+        
+        plt.plot(Fs, crits[j,:], label = "$t_{exc}$ =" + f" {ts[j]:.2f}") #Note: only round (:.2f) in ca
+    
+    plt.hlines(0, 0, Fmax)
+    plt.xlabel('$F$')
+    plt.ylabel('$R_{crit}$')
+    plt.xlim([Fmin, Fmax])
+    
+    plt.legend()
+    
+    # describe(crits)
+
+# initialCrit(Fmin, Fmax, N, tmin, tmax, M)
+
+
+#%% One level deeper: for each texc, pick F s.t. Rcrit = 0. (bad computation time...)
+tmin = 0.2
+tmax = 1
+M = 100
+method = 'root'  # or 'fsolve'
+
+ts = np.linspace(tmin, tmax, M)
+Fzeros = np.zeros(M)*np.nan
+reachedSol = np.zeros(M, dtype = int)
+
+for j in range(M): 
+    texc = ts[j]
+    if method == 'fsolve': 
+        x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True) # orfsolve
+        Fzeros[j] = x
+        
+        reachedSol[j] = (ier == 1)
+            
+    if method == 'root': 
+        sol = root(critical, 0.5/texc, method = 'broyden1')
+        Fzeros[j] = sol.x
+        reachedSol[j] = sol.success
+        
+    print(f"Step {j} out of {M}")
+
+#TODO may be possible to do this much faster by avoiding for-loop; requires adapting 'critical' to also take vector input (and output)
+
+plt.clf()
+tsProper = ts[reachedSol == 1]
+FzerosProper = Fzeros[reachedSol == 1]
+plt.plot(tsProper, FzerosProper) #Note: only round (:.2f) in ca
+
+# plt.hlines(0, 0, Fmax)
+plt.xlabel('$t_{exc}$')
+plt.ylabel('$F$')
+# plt.xlim([Fmin, Fmax])
+
+
 
 
