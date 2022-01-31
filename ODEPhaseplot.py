@@ -128,12 +128,12 @@ def plotAll():
 
 #%% More critical-value analysis: critical initial value for R, varying F and texc
 Fmin = 0.2
-Fmax = 3
+Fmax = 10
 N = 100
 
-tmin = 0.2
+tmin = 0.1
 tmax = 1
-M = 5
+M = 10
 
 def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True): 
     plt.clf() # Clears current figure
@@ -146,7 +146,7 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
         for i in range(N): 
             crits[j,i] = critical(Fs[i], texc = texc)
         
-        plt.plot(Fs, crits[j,:], label = "$t_{exc}$ =" + f" {ts[j]:.2f}") #Note: only round (:.2f) in ca
+        plt.plot(Fs, crits[j,:], label = "$t_{exc}$ =" + f" {ts[j]:.2f}") #Note: only round (:.2f) in case linspace is coarse!
     
     plt.hlines(0, 0, Fmax)
     plt.xlabel('$F$')
@@ -162,42 +162,54 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
 
 #%% One level deeper: for each texc, pick F s.t. Rcrit = 0. (bad computation time...)
 tmin = 0.2
-tmax = 1
+tmax = 0.6
 M = 100
-method = 'root'  #very slow, but seems accurate
+# method = 'root'  #very slow, but seems accurate
 method = 'fsolve' # fast but error-prone
 
-ts = np.linspace(tmin, tmax, M)
-Fzeros = np.zeros(M)*np.nan
-reachedSol = np.zeros(M, dtype = int)
-
-for j in range(M): 
-    texc = ts[j]
-    if method == 'fsolve': 
-        x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True) # orfsolve
-        Fzeros[j] = x
-        
-        reachedSol[j] = (ier == 1)
+def FzeroSolver(tmin, tmax, M, method):
+    global texc
+    
+    ts = np.linspace(tmin, tmax, M)
+    Fzeros = np.zeros(M)
+    reachedSol = np.zeros(M, dtype = int)
+    
+    for j in range(M): 
+        texc = ts[j]
+        if method == 'fsolve': 
+            x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True) # use 'args = ...' kwarg?
+            Fzeros[j] = x
+            # print(x, critical(x))
             
-    if method == 'root': 
-        sol = root(critical, 0.5/texc, method = 'broyden1')
-        Fzeros[j] = sol.x
-        reachedSol[j] = sol.success
-        
-    print(f"Step {j} out of {M}")
+            reachedSol[j] = (ier == 1)
+                
+        if method == 'root': 
+            sol = root(critical, 0.5/texc, method = 'broyden1')
+            Fzeros[j] = sol.x
+            reachedSol[j] = sol.success
+            
+        print(f"Step {j} out of {M}")
+    
+    #TODO may be possible to do this much faster by avoiding for-loop; requires adapting 'critical' to also take vector input (and output)
+    
+    plt.clf()
+    tsProper = ts[reachedSol == 1]
+    FzerosProper = Fzeros[reachedSol == 1]
+    plt.plot(tsProper, FzerosProper) #Note: only round (:.2f) in ca
+    
+    # plt.hlines(0, 0, Fmax)
+    plt.xlabel('$t_{exc}$')
+    plt.ylabel('$F$')
+    # plt.xlim([Fmin, Fmax])
 
-#TODO may be possible to do this much faster by avoiding for-loop; requires adapting 'critical' to also take vector input (and output)
-
-plt.clf()
-tsProper = ts[reachedSol == 1]
-FzerosProper = Fzeros[reachedSol == 1]
-plt.plot(tsProper, FzerosProper) #Note: only round (:.2f) in ca
-
-# plt.hlines(0, 0, Fmax)
-plt.xlabel('$t_{exc}$')
-plt.ylabel('$F$')
-# plt.xlim([Fmin, Fmax])
 
 
 
+#%% Executables: 
+
+# plotAll() # Phase-space, trajectories & vector field
+
+# initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
+
+FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
 
