@@ -14,7 +14,6 @@ Created on Tue Dec 14 17:41:52 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import time as timer
 
 ### Main todos
@@ -27,25 +26,28 @@ import time as timer
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 1       # Total simulation time
+simTime = 0.5       # Total simulation time
 dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
+adaptiveTime = True # Whether to use adaptive timestep in integrator
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none'
+reg = 'none'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
 eps = 0.01          # To avoid singular force making computation instable. 
-cutoff = 50         # To avoid singular force making computation instable. 
+cutoff = 50         # To avoid singular force. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01        # Standard dev. of noise (volatility)
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed creation events
-creaExc = 0.5       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
-stress = 0          # External force; only a constant in 1D case. Needed for creation (external force, also called 'F')
-autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-Fnuc = 0.5    # Threshold for magnitude Peach-Koehler force 
+creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
+stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
+autoCreation = True # Whether dipoles are introduced according to creation rule (as opposed to explicit time and place specification)
+creaProc = 'lin'    # Creation procedure; either 'lin', 'zero' or 'nuc' (for linear gamma, zero-gamma or distance creation respectively)
+Fnuc = 1    # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False  # Whether to plot PK force field behind trajectories
+domain = (0,1)      # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
 
 
 def setExample(N): 
@@ -72,7 +74,7 @@ def setExample(N):
                               [0.3, 0.2, 1, -1],
                               [0.6, 0.5, 1, -1],
                               [0.61, 0.1, 1, -1]])
-        # Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
+        # Format: time, loc, orient is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
         #TODO seems like having two creations occur at exact same time is not yet possible
     
     elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with 5 arbitrary (but 'manual') creation events
@@ -89,29 +91,26 @@ def setExample(N):
     
     else: 
         initialPositions = np.random.uniform(size = N, low = 0, high = 1)
-        #charges:
         b = np.ones(N)
         neg = np.random.choice(range(N),N//2, replace=False)
-        b[neg] = -1
+        b[neg] = -1 # Set half of charges to -1, rest remains 1
     
     
     # Dependent paramaters (deducable from the ones defined above): 
     initialNrParticles = len(initialPositions)
-    domain = (0,1)
 
-setExample(1)
+setExample(0)
 
 ### Create grid, e.g. as possible sources: 
 # nrSources = 11
 # sources = np.linspace(0,1-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
-sources = np.array([0.49])
-# sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
+# sources = np.array([0.49])
+sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
 # nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
 backgrSrc = np.linspace(0,1-1/(nrBackgrSrc - 1), nrBackgrSrc)
 
 # %% FUNCTIONS
-#@jit(nopython=True)
 def pairwiseDistance(x1, PBCs = True, x2 = None):
     """ Compute distances, optionally with PBCs
     
@@ -146,10 +145,11 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
-        interactions = -(diff / distCorrected) * chargeArray 
     else: 
-        interactions = -(1/diff) * chargeArray # Only in 1D; else need diff/dist
-    
+        distCorrected = dist**2 # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        
+        # interactions = -(1/diff) * chargeArray # Only in 1D; else need diff/dist
+    interactions = -(diff / distCorrected) * chargeArray 
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'V1': 
@@ -172,7 +172,7 @@ def projectParticles(x):
 
 
 def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
-    """Computes Peach-Koehler force for each source
+    """Computes Peach-Koehler force for each source, possibly for regularised interaction
     
     (Sources are typically fixed equidistant grid points) """
     
@@ -181,18 +181,13 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
-        interactions = -(diff / distCorrected) * b[np.newaxis,:] 
     else: 
-        interactions = -(1/diff) * b[np.newaxis,:]  # Only in 1D; else need diff/dist
+        distCorrected = dist**2
     
+    interactions = (diff / distCorrected) * b[np.newaxis,:] + stress # According to final expression in meeting notes of 211213
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
-    if regularisation == 'eps': 
-        dist = (dist + eps) # Normalise to avoid computational problems at singularity #TODO doubt it is right to use same eps here!
-    
-    
-    interactions = 2/dist + stress # According to final expression in meeting notes of 211213
-    f = np.sum(interactions, axis = 1)
+    f = np.sum(interactions, axis = 1) # Per source, sum contributions over all dislocs
     
     return f
         
@@ -261,8 +256,8 @@ while t < simTime:
             
             for i in range(nrNewCreations):
                 sign = np.sign(PK[creations[i]]) # Index from 'creations' because PK is computed for all sources, not only new creations
-                charges[2*i] = -sign #TODO check sign! Might be other way around
-                charges[2*i+1] = sign 
+                charges[2*i] = sign #TODO check sign! Might be other way around
+                charges[2*i+1] = -sign 
             
             
             x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
@@ -315,8 +310,9 @@ while t < simTime:
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
-    # dt = min(0.001/np.max(updates), 0.01) # rudimentary adaptive timestep
-    # stepSizes.append(dt)
+    if adaptiveTime: 
+        dt = max(min(0.001/np.max(updates), 0.01),1e-10) # rudimentary adaptive timestep
+        stepSizes.append(dt)
     x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
     
     # Stop simulation if all dislocations have annihilated:
@@ -329,6 +325,7 @@ while t < simTime:
     if randomness: 
         random = sigma * np.random.normal(size = len(x)) # 'noise' part
         x_new += random * np.sqrt(dt) 
+    
     
     if PBCs: 
         x_new = projectParticles(x_new) # Places particles back into box
@@ -348,7 +345,7 @@ while t < simTime:
         
         b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
         b[collidedPairs[1]] = 0
-        x_new[collidedPairs[0]] = np.nan # Take particles out of system
+        x_new[collidedPairs[0]] = np.nan # Take annihilated particles out of system
         x_new[collidedPairs[1]] = np.nan 
         
     
@@ -359,7 +356,7 @@ while t < simTime:
     times.append(t)
     
     if((10*t/simTime) % 1 < 1e-6):
-        print(f"{t} / {simTime}")
+        print(f"{t:.5f} / {simTime}")
 
 
 #Compute and print copmutation time for simulation 
@@ -384,7 +381,7 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
     y = t
     plt.ylim((0,t[-1]))
     
-    if log: 
+    if log: # Plot with time on log-scale
         t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
         plt.yscale('log')
         plt.ylim((t[0],t[-1])) 
@@ -407,9 +404,10 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
         timeCoord = y[:,np.newaxis] * np.ones(len(PK[0]))
         locCoord = backgrSrc * np.ones(len(PK))[:,np.newaxis]
         
-        PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) # Scale to get better colourplot
-        
-        plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
+        if showBackgr: 
+            PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) # Scale to get better colourplot
+            
+            plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 if showBackgr: 
