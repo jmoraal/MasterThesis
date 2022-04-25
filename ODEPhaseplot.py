@@ -13,6 +13,8 @@ from scipy.optimize import fsolve
 from scipy.optimize import root
 
 
+#TODO definition of gamma depends on texc! Is this correctly adjusted? 
+
 F = 1
 texc = 0.5
 rmin = 0
@@ -29,8 +31,9 @@ def gamma(t, texc = texc):
     #     return 1
 
 
-def f(t, R, gamma = gamma, F = F): 
-    return -gamma(t) + F*np.sqrt(2*np.abs(R))
+def f(t, R, gamma = gamma, F = F, texc = texc): 
+    #TODO no abs! (now fixed later, but not very neat.)
+    return -gamma(t, texc = texc) + F*np.sqrt(2*np.abs(R)) # np.abs(R) yields non-physical negative solutions for R (idea of starting at negative distance). To be accounted for later on!
 
 
 
@@ -59,8 +62,8 @@ def plotFeatures():
 
 
 ## The following plots the 'critical solution', above which R diverges and below which R goes to 0: 
-def fprime(t, R): 
-    return -f(texc - t, R)
+def fprime(t, R, texc = texc): 
+    return -f(texc - t, R, texc = texc)
 
 
 def critical(F, texc = texc, plot = False): 
@@ -127,26 +130,22 @@ def plotAll():
 # plotAll()
 
 #%% More critical-value analysis: critical initial value for R, varying F and texc
-Fmin = 0.2
-Fmax = 10
-N = 100
 
-tmin = 0.1
-tmax = 1
-M = 10
 
 def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True): 
     plt.clf() # Clears current figure
     
     Fs = np.linspace(Fmin, Fmax, N)
     ts = np.linspace(tmin, tmax, M)
-    crits = np.zeros((M,N))
+    crits = np.zeros((M,N)) #not strictly  necessary to store all, but may come in handy
     for j in range(M): 
         texc = ts[j]
         for i in range(N): 
             crits[j,i] = critical(Fs[i], texc = texc)
         
-        plt.plot(Fs, crits[j,:], label = "$t_{exc}$ =" + f" {ts[j]:.2f}") #Note: only round (:.2f) in case linspace is coarse!
+        Rs = crits[j,:] 
+        Rs[Rs < 0] = np.nan #remove negative values (only there so solver works more easily)
+        plt.plot(Fs, Rs, label = "$t_{exc}$ =" + f" {ts[j]:.2f}") #Note: only round (:.2f) in case linspace is coarse!
     
     plt.hlines(0, 0, Fmax)
     plt.xlabel('$F$')
@@ -161,11 +160,7 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
 
 
 #%% One level deeper: for each texc, pick F s.t. Rcrit = 0. (bad computation time...)
-tmin = 0.2
-tmax = 0.6
-M = 100
-# method = 'root'  #very slow, but seems accurate
-method = 'fsolve' # fast but error-prone
+
 
 def FzeroSolver(tmin, tmax, M, method):
     global texc
@@ -209,7 +204,21 @@ def FzeroSolver(tmin, tmax, M, method):
 
 # plotAll() # Phase-space, trajectories & vector field
 
-# initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
 
-FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
+Fmin = 0.2
+Fmax = 10
+N = 100
+
+tmin = 0.2
+tmax = 1
+M = 5
+initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
+
+
+# tmin = 0.2
+# tmax = 0.6
+# M = 100
+# # method = 'root'  #very slow, but seems accurate
+# method = 'fsolve' # fast but error-prone
+# FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
 
