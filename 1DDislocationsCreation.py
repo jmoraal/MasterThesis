@@ -40,9 +40,9 @@ collTres = 0.005    # Collision threshold; if particles are closer than this, th
 manualCrea = False  # Whether to include manually appointed creation events
 creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
-autoCreation = True # Whether dipoles are introduced according to creation rule (as opposed to explicit time and place specification)
+autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'lin'    # Creation procedure; either 'lin', 'zero' or 'nuc' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 1    # Threshold for magnitude of Peach-Koehler force 
+Fnuc = 0.5    # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
@@ -102,10 +102,10 @@ def setExample(N):
 setExample(0)
 
 ### Create grid, e.g. as possible sources: 
-# nrSources = 11
-# sources = np.linspace(0,1-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
+nrSources = 11
+sources = np.linspace(0,1-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
 # sources = np.array([0.49])
-sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
+# sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
 # nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
 backgrSrc = np.linspace(0,1-1/(nrBackgrSrc - 1), nrBackgrSrc)
@@ -238,19 +238,32 @@ while t < simTime:
         tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
         creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
         nrNewCreations = len(creations)
+        PKNewCreations = np.abs(PK[creations])
         nrNewDislocs = nrNewCreations * 2
         if nrNewDislocs > 0:
             tresHist[creations] = 0 # Reset counters of new creations
             
-            # To keep track of force exception:
-            creaTrackers = np.append(creaTrackers, creaExc * np.ones(nrNewCreations)) # Set counters to count down from exceptionSteps
-            creaIdx = np.append(creaIdx, np.arange(nrNewCreations)*2+len(x)) # Keep track for which dislocations these are; keep 1st index of every pair
+            # Set counters for exception time, to keep track of force exception:
+            if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
+                excTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
+            elif creaProc == 'zero': 
+                excTimes = 1/(4*PKNewCreations**2)
+            else: #TODO remove this entirely! distance creation should not have force exception
+                excTimes = creaExc * np.ones(nrNewCreations)
+            
+            creaTrackers = np.append(creaTrackers, excTimes) # Set counters to count down from exception time
+            creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
             #TODO check what to do when several sources close to eachother simultaneously reach threshold
             
             #The following is a bit tedious, should be possible in a simpler way
             locs = np.zeros(nrNewDislocs)
-            locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
-            locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
+            if creaProc == 'nuc': 
+                locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
+                locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
+            else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
+                  #Instead, since we annihilate at collTres, we also take this for creation
+                locs[::2] = sources[creations] - 0.5*collTres 
+                locs[1::2] = sources[creations] + 0.5*collTres 
             
             charges = np.zeros(nrNewDislocs)
             
@@ -288,10 +301,14 @@ while t < simTime:
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
     if autoCreation and len(creaTrackers) > 0: 
-        for i in range(len(creaTrackers)): 
-            idx = initialNrParticles + 2 * creaIdx[i] # 
-            # Idea: make interaction forces transition linearly from -1 (opposite) to 1 (actual force)
-            interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/creaExc # linear transition from opposite force (factor -1) to actual force (1)
+        for i in range(len(creaTrackers)): # For each recent creation...
+            idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
+            
+            # Multiply interactions within new dipole by corresponding gamma(t) from report:
+            if creaProc == 'lin': 
+                interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/creaExc # linear transition from opposite force (factor -1) to actual force (1)
+            if creaProc == 'zero': 
+                interactions[idx : idx + 2,idx : idx + 2] = 0
         
         creaTrackers -= dt # Count down at all trackers
         creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
