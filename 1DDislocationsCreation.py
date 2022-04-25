@@ -31,8 +31,8 @@ dt = 0.0005         # Timestep for discretisation (or initial, if adaptive times
 adaptiveTime = True # Whether to use adaptive timestep in integrator
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'none'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
-eps = 0.01          # To avoid singular force making computation instable. 
-cutoff = 50         # To avoid singular force. Typically, force magnitude is 50 just before annihilation with eps=0.01
+eps = 0.01          # Regularisation parameter
+cutoff = 50         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01        # Standard dev. of noise (volatility)
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
@@ -41,7 +41,7 @@ manualCrea = False  # Whether to include manually appointed creation events
 creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
-creaProc = 'lin'    # Creation procedure; either 'lin', 'zero' or 'nuc' (for linear gamma, zero-gamma or distance creation respectively)
+creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
 Fnuc = 0.5    # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
@@ -57,7 +57,7 @@ def setExample(N):
         initialPositions = np.array([np.nan, np.nan]) 
         b = np.array([1, -1])    
     
-    elif N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
+    elif N == 0: ### Example 0: 
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
         b = np.array([1, -1])    
     
@@ -77,7 +77,7 @@ def setExample(N):
         # Format: time, loc, orient is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
         #TODO seems like having two creations occur at exact same time is not yet possible
     
-    elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with 5 arbitrary (but 'manual') creation events
+    elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with arbitrary (but 'manual') creation events
         nrParticles = 10
         initialPositions = np.random.uniform(size = nrParticles, low = 0, high = 1)
         # 0/1 charges:
@@ -90,7 +90,7 @@ def setExample(N):
         creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
     
     else: 
-        initialPositions = np.random.uniform(size = N, low = 0, high = 1)
+        initialPositions = np.random.uniform(size = N) 
         b = np.ones(N)
         neg = np.random.choice(range(N),N//2, replace=False)
         b[neg] = -1 # Set half of charges to -1, rest remains 1
@@ -109,6 +109,7 @@ sources = np.linspace(0,1-1/(nrSources - 1), nrSources) # Remove last source, el
 # nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
 backgrSrc = np.linspace(0,1-1/(nrBackgrSrc - 1), nrBackgrSrc)
+
 
 # %% FUNCTIONS
 def pairwiseDistance(x1, PBCs = True, x2 = None):
@@ -220,6 +221,8 @@ if autoCreation:
     creaTrackers = []
     creaIdx = np.array([], dtype = 'int64')
     #exceptionSteps = int(creaExc / dt)
+    if creaProc == 'lin': 
+        excTimes = []
     
     if showBackgr: 
         PKlog = np.zeros((0,nrBackgrSrc))
@@ -245,15 +248,15 @@ while t < simTime:
             
             # Set counters for exception time, to keep track of force exception:
             if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
-                excTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
+                newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
             elif creaProc == 'zero': 
-                excTimes = 1/(4*PKNewCreations**2)
-            else: #TODO remove this entirely! distance creation should not have force exception
-                excTimes = creaExc * np.ones(nrNewCreations)
+                newExcTimes = 1/(4*PKNewCreations**2)
             
-            creaTrackers = np.append(creaTrackers, excTimes) # Set counters to count down from exception time
-            creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
-            #TODO check what to do when several sources close to eachother simultaneously reach threshold
+            if (creaProc == 'lin' or creaProc == 'zero'): 
+                creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
+                creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
+            if (creaProc == 'lin'): # For linear gamma creation, additionally:
+                excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
             
             #The following is a bit tedious, should be possible in a simpler way
             locs = np.zeros(nrNewDislocs)
@@ -301,18 +304,21 @@ while t < simTime:
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
     if autoCreation and len(creaTrackers) > 0: 
-        for i in range(len(creaTrackers)): # For each recent creation...
-            idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
+        if (creaProc == 'lin' or creaProc == 'zero'): 
+            for i in range(len(creaTrackers)): # For each recent creation...
+                idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
+                
+                # Multiply interactions within new dipole by corresponding gamma(t) from report:
+                if creaProc == 'lin': 
+                    interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/excTimes[i] # linear transition from opposite force (factor -1) to actual force (1)
+                if creaProc == 'zero': 
+                    interactions[idx : idx + 2,idx : idx + 2] = 0
             
-            # Multiply interactions within new dipole by corresponding gamma(t) from report:
+            creaTrackers -= dt # Count down at all trackers
+            creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
             if creaProc == 'lin': 
-                interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/creaExc # linear transition from opposite force (factor -1) to actual force (1)
-            if creaProc == 'zero': 
-                interactions[idx : idx + 2,idx : idx + 2] = 0
-        
-        creaTrackers -= dt # Count down at all trackers
-        creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
-        creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
+                excTimes = excTimes[creaTrackers > 0] # Also remove corresponding exception times
+            creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         
     
     # if manualCrea:
