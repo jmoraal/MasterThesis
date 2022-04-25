@@ -12,13 +12,15 @@ from scipy.integrate import solve_ivp
 
 
 # %% Simulation settings
-simTime = 1000         # Total simulation time
+simTime = 1.5         # Total simulation time
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
 eps = 0.01        # To avoid singular force making computation instable. 
 boxLength = 5
 annihilation = False
 collTres = 0.001
+
+#TODO If we use collision threshold, do we even need regularisation?
 
 
 def setExample(N, boxLen = 1): 
@@ -32,7 +34,7 @@ def setExample(N, boxLen = 1):
     boxLength = boxLen
         
     if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
-        initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
+        initialPositions = np.array([-0.1, 0.1]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
         b = np.array([1, 1])    
     elif N == 1: ### Example 1:
         initialPositions = np.array([0.21, 0.7, 0.8]) 
@@ -40,6 +42,12 @@ def setExample(N, boxLen = 1):
     elif N == 2: ### Example 2:
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
+    elif N == 4: 
+        initialPositions = np.array([-2,-1,1,2]) 
+        b = np.array([-1, 1, -1, 1]) 
+    elif N == 6: 
+        initialPositions = np.array([-2,-1,-0.7, 0.7,1,2]) 
+        b = np.array([-1, 1,-1, 1, -1, 1]) 
     else: ### Example 3: Arbitrary number of particles
         initialPositions = np.random.uniform(size = N, low = 0, high = boxLength)
         #charges:
@@ -52,7 +60,7 @@ def setExample(N, boxLen = 1):
     domain = (0,boxLength)
 
 
-setExample(100, boxLen = boxLength)
+setExample(0, boxLen = boxLength)
 
 # To plot: 
 bInitial = np.copy(b)
@@ -124,8 +132,12 @@ def f(t,x, regularisation = 'eps', PBCs = False):
     updates = np.nansum(interactions,axis = 1) 
     
     if annihilation: 
-        annIdx = np.where((dist < collTres) * (chargeArray == -1))[0]
-        b[annIdx] = 0 #so that only close and opposite-charged particles annihilate. * works as 'and'-operator for boolean (1/0) arrays
+        annIdx = np.where((dist < collTres) * (chargeArray == -1))[0] # * works as 'and'-operator for boolean (1/0) arrays
+        #so that only close and opposite-charged particles annihilate. 
+        
+        #Now if n particles collide, at least n-1 annihilate; the other (arbitrary) gets remaining charge.
+        b[annIdx[1:]] = 0 
+        b[annIdx[0]] = np.sum(b[annIdx]) #Should always be 0, -1 or 1!
         #TODO does not properly cover the case where e.g. three dislocations are close; then now, all annihilate (wrongly)
         annTimes[annIdx] = t #save for plotting
         
@@ -177,7 +189,7 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
     t = sol.t
     x = np.transpose(sol.y)
         
-    colorDict = {-1:'red', 0:'grey', 1:'blue'}
+    colorDict = {1:'red', 0:'grey', -1:'blue'}
     nrParticles = len(x[0])
     plt.ylim((0,t[-1]))
     plt.xlim((np.min(x),np.max(x)))
@@ -210,6 +222,6 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
     plt.show()
 
 if annihilation: 
-    plotODESol(sol, bInitial, log = True, annihilationTimes=annTimes)
+    plotODESol(sol, bInitial, log = False, annihilationTimes=annTimes)
 else: 
-    plotODESol(sol, bInitial, log = True)
+    plotODESol(sol, bInitial, log = False)
