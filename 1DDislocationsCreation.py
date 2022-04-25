@@ -21,47 +21,52 @@ import time as timer
 #TODO Implement better integration scheme! Currently use forward Euler (originating from stochastic SDE approach) with improvised adaptive timestep
 #TODO Find reasonable parameters
 #TODO Use NaNs in position array to be more memory and time efficient (note that dist computation is O(n²)!)
-#TODO make more class-based? May help a lot with readability etc
 #TODO make sticky collisions faster! Now very inefficient
+#TODO adapt variable names to correspond to overleaf (or other way around)
 
 
 ### Simulation settings
-simTime = 100       # Total simulation time
-dt = 0.0005         # Timestep for discretisation
+simTime = 1       # Total simulation time
+dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15) or 'cutoff' 
 eps = 0.01          # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
 randomness = False  # Whether to add random noise to dislocation positions
-sigma = 0.01        # Influence of noise
+sigma = 0.01        # Influence of noise (multiplicative)
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-manualCrea = False  # Whether to include manually appointed dislocation creations
-creaExc = 0.2       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold.
-stress = 5          # Constant in 1D case. Needed for creation
-autoCreation = False # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 1000    # Threshold for magnitude Peach-Koehler force
+manualCrea = False  # Whether to include manually appointed creation events
+creaExc = 0.5       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
+stress = 1          # External force; only a constant in 1D case. Needed for creation (external force, also called 'F')
+autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
+forceTres = 0.5    # Threshold for magnitude Peach-Koehler force
 timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
-drag = 1
+drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False 
 
 
 def setExample(N): 
     global boxLength, initialPositions, b, creations, domain, initialNrParticles
         
-    if N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
+    if N == -1: ### Empty example; requires some adaptions in code below (e.g. turn off 'no dislocations left' break)
+        boxLength = 1
+        initialPositions = np.array([np.nan, np.nan]) 
+        b = np.array([1, -1])    
+    
+    elif N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
         boxLength = 1
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
         b = np.array([1, -1])    
     
-    if N == 1: ### Example 1:
+    elif N == 1: ### Example 1:
         boxLength = 1
         initialPositions = np.array([0.21, 0.7, 0.8]) 
         b = np.array([-1, 1, 1])
         
     
-    if N == 2: ### Example 2:
+    elif N == 2: ### Example 2:
         boxLength = 1
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
@@ -74,8 +79,7 @@ def setExample(N):
         #TODO seems like two creations at exact same time are not yet possible
         # Also, orientation is quite important for whether a creation immediately annihilates or not
     
-    
-    if N == 3: ### Example 3:
+    elif N == 3: ### Example 3:
         boxLength = 1
         nrParticles = 10
         initialPositions = np.random.uniform(size = nrParticles, low = 0, high = boxLength)
@@ -101,11 +105,12 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(100)
+setExample(-1)
 
 ### Create grid, e.g. as possible sources: 
-nrSources = 11
-sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
+# nrSources = 11
+# sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
+sources = np.array([0.49])
 # sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
 # nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
@@ -316,13 +321,13 @@ while t < simTime:
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
-    dt = min(0.001/np.max(updates), 0.01)
+    # dt = min(0.001/np.max(updates), 0.01)
     x_new = x + drag * updates * dt #TODO use scipy odeint-integrator! 
     
     stepSizes.append(dt)
-    if np.isnan(x_new).all():
-        print('No dislocations left')
-        break
+    # if np.isnan(x_new).all():
+    #     print('No dislocations left')
+    #     break
     
     
     if randomness: 
@@ -374,7 +379,7 @@ def plotAnim(bInitial, trajectories):
     
     # only 0/1-values:
     if (bInitial.dtype == np.dtype('int32')):
-        colorDict = {-1:'red', 0:'grey', 1:'blue'}
+        colorDict = {1:'red', 0:'grey', -1:'blue'}
         cols = np.vectorize(colorDict.get)(bInitial).tolist() # Convert array of -1/0/1 to red/grey/blue
         #TODO: This way, particles that collide at some point are gray from the beginning...
         #      Can we set colours within update function?
@@ -426,7 +431,7 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
     plt.clf() # Clears current figure
     
     trajectories = np.ndarray.squeeze(trajectories)
-    colorDict = {-1:'red', 0:'grey', 1:'blue'}
+    colorDict = {1:'red', 0:'grey', -1:'blue'}
     
     nrPoints, nrTrajectories = np.shape(trajectories)
     
@@ -464,4 +469,4 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
 if showBackgr: 
     plot1D(bInitial, trajectories, times, PK = PKlog)
 else: 
-    plot1D(bInitial, trajectories, times, log = True)
+    plot1D(bInitial, trajectories, times, log = False)
