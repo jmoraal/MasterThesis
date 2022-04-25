@@ -45,30 +45,26 @@ Fnuc = 0.5    # Threshold for magnitude Peach-Koehler force
 tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
-showBackgr = False 
+showBackgr = False  # Whether to plot PK force field behind trajectories
 
 
 def setExample(N): 
-    global boxLength, initialPositions, b, creations, domain, initialNrParticles
+    global initialPositions, b, creations, domain, initialNrParticles
         
     if N == -1: ### Empty example; requires some adaptions in code below (e.g. turn off 'no dislocations left' break)
-        boxLength = 1
         initialPositions = np.array([np.nan, np.nan]) 
         b = np.array([1, -1])    
     
     elif N == 0: ### Example 0: #TODO these trajectories are not smooth, seems wrong...
-        boxLength = 1
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
         b = np.array([1, -1])    
     
     elif N == 1: ### Example 1:
-        boxLength = 1
         initialPositions = np.array([0.21, 0.7, 0.8]) 
         b = np.array([-1, 1, 1])
         
     
     elif N == 2: ### Example 2: manually appointed creation events
-        boxLength = 1
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
         # Creation time, place and 'orientation' (+/- charge order):
@@ -80,21 +76,19 @@ def setExample(N):
         #TODO seems like having two creations occur at exact same time is not yet possible
     
     elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with 5 arbitrary (but 'manual') creation events
-        boxLength = 1
         nrParticles = 10
-        initialPositions = np.random.uniform(size = nrParticles, low = 0, high = boxLength)
+        initialPositions = np.random.uniform(size = nrParticles, low = 0, high = 1)
         # 0/1 charges:
         b = np.random.choice((-1,1),nrParticles)
         
         nrCreations = 5
         creations = np.zeros((nrCreations,4))
         creations[:,0] = np.linspace(0,0.5*simTime, nrCreations) # Creation times; Last creation at 0.5 simTime to see equilibrium develop
-        creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = boxLength) # Locations. Needs to be adapted for multi-D
+        creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = 1) # Locations. Needs to be adapted for multi-D
         creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
     
     else: 
-        boxLength = 1
-        initialPositions = np.random.uniform(size = N, low = 0, high = boxLength)
+        initialPositions = np.random.uniform(size = N, low = 0, high = 1)
         #charges:
         b = np.ones(N)
         neg = np.random.choice(range(N),N//2, replace=False)
@@ -103,18 +97,18 @@ def setExample(N):
     
     # Dependent paramaters (deducable from the ones defined above): 
     initialNrParticles = len(initialPositions)
-    domain = (0,boxLength)
+    domain = (0,1)
 
 setExample(1)
 
 ### Create grid, e.g. as possible sources: 
 # nrSources = 11
-# sources = np.linspace(0,boxLength-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
+# sources = np.linspace(0,1-1/(nrSources - 1), nrSources) # Remove last source, else have duplicate via periodic boundaries
 sources = np.array([0.49])
 # sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
 # nrSources = len(sources)
 nrBackgrSrc = 100 #Only to plot
-backgrSrc = np.linspace(0,boxLength-1/(nrBackgrSrc - 1), nrBackgrSrc)
+backgrSrc = np.linspace(0,1-1/(nrBackgrSrc - 1), nrBackgrSrc)
 
 # %% FUNCTIONS
 #@jit(nopython=True)
@@ -134,7 +128,7 @@ def pairwiseDistance(x1, PBCs = True, x2 = None):
     
     diff = x1 - x2[:,np.newaxis] # Difference vectors 
     if PBCs: # There may be an easier way in 1D...
-        diff = diff - np.floor(0.5 + diff/boxLength)*boxLength # Calculate difference vector to closest copy of particle (with correct orientation). 
+        diff = diff - np.floor(0.5 + diff) # Calculate difference vector to closest copy of particle (with correct orientation). 
         
     dist = np.abs(diff) # Compute length of difference vectors (in 1D, else use linalg.norm w/ axis=2)
     
@@ -170,7 +164,7 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
 def projectParticles(x):
     """Projects particles into box of given size."""
     
-    x[np.isfinite(x)] %= boxLength # Also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
+    x[np.isfinite(x)] %= 1 # Also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
     # Index by isfinite to not affect np.nan (still works otherwise, but gives warning)
 
     return x
