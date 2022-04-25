@@ -24,24 +24,25 @@ import time as timer
 #TODO make sticky collisions faster! Now very inefficient
 #TODO adapt variable names to correspond to overleaf (or other way around)
 
+#%% INITIALISATION
 
 ### Simulation settings
 simTime = 1       # Total simulation time
 dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15) or 'cutoff' 
+reg = 'eps'         # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none'
 eps = 0.01          # To avoid singular force making computation instable. 
 cutoff = 50         # To avoid singular force making computation instable. 
-randomness = False  # Whether to add random noise to dislocation positions
-sigma = 0.01        # Influence of noise (multiplicative)
+randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
+sigma = 0.01        # Standard dev. of noise (volatility)
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
 manualCrea = False  # Whether to include manually appointed creation events
 creaExc = 0.5       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
-stress = 1          # External force; only a constant in 1D case. Needed for creation (external force, also called 'F')
+stress = 0          # External force; only a constant in 1D case. Needed for creation (external force, also called 'F')
 autoCreation = True # Whether dipoles are introduced according to rule (as opposed to explicit time and place specification)
-forceTres = 0.5    # Threshold for magnitude Peach-Koehler force
-timeTres = 0.02     # Threshold for duration of PK force magnitude before creation
+Fnuc = 0.5    # Threshold for magnitude Peach-Koehler force 
+tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False 
@@ -66,20 +67,19 @@ def setExample(N):
         b = np.array([-1, 1, 1])
         
     
-    elif N == 2: ### Example 2:
+    elif N == 2: ### Example 2: manually appointed creation events
         boxLength = 1
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
-        # Creation time, place and 'orientation' (positive/negative charge order):
+        # Creation time, place and 'orientation' (+/- charge order):
         creations = np.array([[0.14, 0.5, 1, -1],
                               [0.3, 0.2, 1, -1],
                               [0.6, 0.5, 1, -1],
                               [0.61, 0.1, 1, -1]])
         # Format: time, loc, orient. is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
-        #TODO seems like two creations at exact same time are not yet possible
-        # Also, orientation is quite important for whether a creation immediately annihilates or not
+        #TODO seems like having two creations occur at exact same time is not yet possible
     
-    elif N == 3: ### Example 3:
+    elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with 5 arbitrary (but 'manual') creation events
         boxLength = 1
         nrParticles = 10
         initialPositions = np.random.uniform(size = nrParticles, low = 0, high = boxLength)
@@ -93,7 +93,7 @@ def setExample(N):
         creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
     
     else: 
-        boxLength = int(N/50)
+        boxLength = 1
         initialPositions = np.random.uniform(size = N, low = 0, high = boxLength)
         #charges:
         b = np.ones(N)
@@ -105,7 +105,7 @@ def setExample(N):
     initialNrParticles = len(initialPositions)
     domain = (0,boxLength)
 
-setExample(-1)
+setExample(1)
 
 ### Create grid, e.g. as possible sources: 
 # nrSources = 11
@@ -116,7 +116,7 @@ sources = np.array([0.49])
 nrBackgrSrc = 100 #Only to plot
 backgrSrc = np.linspace(0,boxLength-1/(nrBackgrSrc - 1), nrBackgrSrc)
 
-# %%
+# %% FUNCTIONS
 #@jit(nopython=True)
 def pairwiseDistance(x1, PBCs = True, x2 = None):
     """ Compute distances, optionally with PBCs
@@ -152,10 +152,10 @@ def interaction(diff,dist,b, PBCBool = True, regularisation = 'eps'):
     
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        interactions = -(diff / distCorrected) * chargeArray 
     else: 
-        distCorrected = dist**2
+        interactions = -(1/diff) * chargeArray # Only in 1D; else need diff/dist
     
-    interactions = -(diff / distCorrected) * chargeArray #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'V1': 
@@ -182,16 +182,15 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     
     (Sources are typically fixed equidistant grid points) """
     
-    x = np.nan_to_num(x)
+    x = np.nan_to_num(x) #sets NaNs to 0
     dist, diff = pairwiseDistance(x, x2 = sources) 
     
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        interactions = -(diff / distCorrected) * b[np.newaxis,:] 
     else: 
-        distCorrected = dist**2
+        interactions = -(1/diff) * b[np.newaxis,:]  # Only in 1D; else need diff/dist
     
-    
-    interactions = -(diff / distCorrected) * b[np.newaxis,:] #len(b) is nr of particles
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'eps': 
@@ -205,7 +204,6 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
         
 
 # %% SIMULATION
-
 
 ### Precomputation
 #nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
@@ -233,8 +231,9 @@ if autoCreation:
     creaTrackers = []
     creaIdx = np.array([], dtype = 'int64')
     #exceptionSteps = int(creaExc / dt)
-
-    PKlog = np.zeros((0,nrBackgrSrc))
+    
+    if showBackgr: 
+        PKlog = np.zeros((0,nrBackgrSrc))
 
 simStartTime = timer.time() # To measure simulation computation time
 
@@ -243,11 +242,12 @@ while t < simTime:
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
         PK = PeachKoehler(sources, x, b, stress) 
-        PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
+        if showBackgr: 
+            PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
 
-        tresHist[np.abs(PK) >= forceTres] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
-        tresHist[np.abs(PK) < forceTres] = 0 # Set all others to 0
-        creations = np.where(tresHist >= timeTres)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
+        tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
+        tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
+        creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
         nrNewCreations = len(creations)
         nrNewDislocs = nrNewCreations * 2
         if nrNewDislocs > 0:
@@ -310,7 +310,7 @@ while t < simTime:
         
     
     # if manualCrea:
-    #     #TODO do we also need this for automatic creations, or is relation w/ sheer stress etc. enough?
+    #     #TODO do we also need this for automatic creations, or is relation w/ shear stress etc. enough?
     #     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
     #         if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
     #             idx = initialNrParticles + 2 * i
@@ -321,13 +321,15 @@ while t < simTime:
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
-    # dt = min(0.001/np.max(updates), 0.01)
-    x_new = x + drag * updates * dt #TODO use scipy odeint-integrator! 
+    # dt = min(0.001/np.max(updates), 0.01) # rudimentary adaptive timestep
+    # stepSizes.append(dt)
+    x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
     
-    stepSizes.append(dt)
-    # if np.isnan(x_new).all():
-    #     print('No dislocations left')
-    #     break
+    # Stop simulation if all dislocations have annihilated:
+    # (in this case PK=0, so no creations can occur anymore either)
+    if np.isnan(x_new).all():
+        print('No dislocations left')
+        break
     
     
     if randomness: 
@@ -366,64 +368,14 @@ while t < simTime:
         print(f"{t} / {simTime}")
 
 
+#Compute and print copmutation time for simulation 
 duration = timer.time() - simStartTime
 print("Simulation duration was ", int(duration/3600), 'hours, ', 
                                   int((duration%3600)/60), " minutes and ", 
                                   int(duration%60), "seconds")  
 
 
-# %%
-### Plot animation ###
-def plotAnim(bInitial, trajectories): 
-    nrSteps = len(trajectories)
-    
-    # only 0/1-values:
-    if (bInitial.dtype == np.dtype('int32')):
-        colorDict = {1:'red', 0:'grey', -1:'blue'}
-        cols = np.vectorize(colorDict.get)(bInitial).tolist() # Convert array of -1/0/1 to red/grey/blue
-        #TODO: This way, particles that collide at some point are gray from the beginning...
-        #      Can we set colours within update function?
-    
-    # General values of b, not only 0/1: 
-    if (bInitial.dtype == np.dtype('float64')):
-        n = len(bInitial)
-        cols = [0]*n
-        
-        # Not nicest construction yet, but loop time is negligible compared to simulation
-        for i in range(n): 
-            if (bInitial[i] < 0): 
-                cols[i] = 'red'
-            # if ([i] == 0): 
-            #     cols[i] = 'grey'
-            if (bInitial[i] >= 0): 
-                cols[i] = 'blue'
-        
-    
-    
-    fig = plt.figure()
-    ax = plt.axes(xlim=domain[0], ylim=domain[1])
-    scat = ax.scatter(trajectories[0,:,0], trajectories[0,:,1], c = cols) 
-    
-    
-    time_template = 'time = %.1fs'
-    time_text = ax.text(0.05, 0.9, '', transform=ax.transAxes)
-    t_init = 0 # Offset e.g. when disregarding warmup period
-    
-    def update(i):
-        update.k += 1
-        xs = trajectories[i,:,0]
-        ys = trajectories[i,:,1]
-        predata = np.array([xs,ys])
-        data = np.transpose(predata)
-        scat.set_offsets(data)
-        time_text.set_text(time_template % (t_init+i*dt))
-        return scat, time_text
-    
-    update.k = 0
-    
-    ani = animation.FuncAnimation(fig, update, frames=nrSteps, interval=dt*10, )
-    plt.show()
-
+# %% VISUALISATION
 
 #1D plot:    
 def plot1D(bInitial, trajectories, t, PK = None, log = False): 
