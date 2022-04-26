@@ -47,6 +47,8 @@ drag = 1            # Multiplicative factor; only scales time I believe (and pos
 showBackgr = False  # Whether to plot PK force field behind trajectories
 domain = (0,1)      # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
 
+classes = True # temporary variable to test object-oriented creation procedure
+
 
 def setExample(N): 
     '''
@@ -265,7 +267,7 @@ class Creation:
         self.creaTime = None
     
     
-    def create(self, loc, PK, N, t):
+    def create(self, loc, PK, t, N):
         self.idx = N+1
         self.creaTime = t
         
@@ -293,8 +295,8 @@ class Creation:
         
         return adjForce
             
-        
-    
+
+
 
 class Source: 
     def __init__(self, loc):
@@ -306,9 +308,8 @@ class Source:
         if (np.abs(PK) > Fnuc): 
             self.tAboveThreshold += dt
             if self.tAboveThreshold >= tnuc: 
-                loc = self.pos
-                Creation.create(loc, PK, N, t)
                 self.tAboveThreshold = 0
+                return True
         else: 
             self.tAboveThreshold = 0
         
@@ -326,12 +327,18 @@ x = np.copy(initialPositions)
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
 if autoCreation: 
-    tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
-    creaTrackers = []
-    creaIdx = np.array([], dtype = 'int64')
-    #exceptionSteps = int(creaExc / dt)
-    if creaProc == 'lin': 
-        excTimes = []
+    if classes: # Initialise sources and store classes in list
+        sources = [Source(x) for x in sources]
+        creations = []
+        creationCounter = 0
+    
+    else: 
+        tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
+        creaTrackers = []
+        creaIdx = np.array([], dtype = 'int64')
+        #exceptionSteps = int(creaExc / dt)
+        if creaProc == 'lin': 
+            excTimes = []
     
     if showBackgr: 
         PKlog = np.zeros((0,nrBackgrSrc))
@@ -346,59 +353,69 @@ while t < simTime:
         
         if showBackgr: 
             PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
-
-        # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
-        # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
-        tresHist[PK >= Fnuc] += dt
-        tresHist[PK <= -Fnuc] += dt
-        tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
         
-        creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
-        nrNewCreations = len(creations)
-        PKNewCreations = PK[creations]
-        nrNewDislocs = nrNewCreations * 2
-        if nrNewDislocs > 0:
-            tresHist[creations] = 0 # Reset counters of new creations
+        if classes: 
+            for i in len(sources): 
+                thresReached = sources[i].updateThresTime(PK[i], dt, len(x))
+                if thresReached: 
+                    creationCounter += 1
+                    creations.append(Creation(sources[i].pos, PK[i], t, len(x) + len(creations)))
+                
+                
+        
+        else: 
+            # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
+            # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
+            tresHist[PK >= Fnuc] += dt
+            tresHist[PK <= -Fnuc] += dt
+            tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
             
+            creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
+            nrNewCreations = len(creations)
+            PKNewCreations = PK[creations]
+            nrNewDislocs = nrNewCreations * 2
+            if nrNewDislocs > 0:
+                tresHist[creations] = 0 # Reset counters of new creations
+                
+                
+                # Set counters for exception time, to keep track of force exception:
+                if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
+                    newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
+                elif creaProc == 'zero': 
+                    newExcTimes = 1/(4*PKNewCreations**2)
+                elif creaProc == 'nuc': 
+                    Lnuc = 1/(2* PKNewCreations)
+                
+                if (creaProc == 'lin' or creaProc == 'zero'): 
+                    creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
+                    creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
+                if (creaProc == 'lin'): # For linear gamma creation, additionally:
+                    excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
+                
+                #The following is a bit tedious, should be possible in a simpler way
+                locs = np.zeros(nrNewDislocs)
+                if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
+                    locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
+                    locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
+                else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
+                      #Instead, since we annihilate at collTres, we also take this for creation
+                    locs[::2] = sources[creations] - 0.6*collTres 
+                    locs[1::2] = sources[creations] + 0.6*collTres 
+                
+                charges = np.zeros(nrNewDislocs)
+                
+                for i in range(nrNewCreations):
+                    sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
+                    charges[2*i] = sign 
+                    charges[2*i+1] = -sign 
+                
+                print(locs)
+                print(t)
             
-            # Set counters for exception time, to keep track of force exception:
-            if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
-                newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
-            elif creaProc == 'zero': 
-                newExcTimes = 1/(4*PKNewCreations**2)
-            elif creaProc == 'nuc': 
-                Lnuc = 1/(2* PKNewCreations)
-            
-            if (creaProc == 'lin' or creaProc == 'zero'): 
-                creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
-                creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
-            if (creaProc == 'lin'): # For linear gamma creation, additionally:
-                excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
-            
-            #The following is a bit tedious, should be possible in a simpler way
-            locs = np.zeros(nrNewDislocs)
-            if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
-                locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
-                locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-            else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
-                  #Instead, since we annihilate at collTres, we also take this for creation
-                locs[::2] = sources[creations] - 0.6*collTres 
-                locs[1::2] = sources[creations] + 0.6*collTres 
-            
-            charges = np.zeros(nrNewDislocs)
-            
-            for i in range(nrNewCreations):
-                sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
-                charges[2*i] = sign 
-                charges[2*i+1] = -sign 
-            
-            print(locs)
-            print(t)
-            
-            x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
-            b = np.append(b, charges)
-            bInitial = np.append(bInitial, charges) #For correct plot colours
-            trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
+        x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
+        b = np.append(b, charges)
+        bInitial = np.append(bInitial, charges) #For correct plot colours
+        trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
             
     #TODO case statement?    
   
