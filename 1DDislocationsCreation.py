@@ -30,7 +30,7 @@ simTime = 0.5       # Total simulation time
 dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
 adaptiveTime = True # Whether to use adaptive timestep in integrator
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'cutoff'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
+reg = 'eps'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
 eps = 0.01          # Regularisation parameter
 cutoff = 100         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
@@ -39,9 +39,9 @@ sticky = True       # Whether collisions are sticky, i.e. particles stay togethe
 collTres = 0.005#e-7    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
-creaProc = 'lin'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 0.5    # Threshold for magnitude of Peach-Koehler force 
-tnuc = 0.05     # Threshold for duration of PK force magnitude before creation
+creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
+Fnuc = 2    # Threshold for magnitude of Peach-Koehler force 
+tnuc = 0.1     # Threshold for duration of PK force magnitude before creation
 Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False  # Whether to plot PK force field behind trajectories
@@ -71,7 +71,7 @@ def setExample(N):
     
     
     elif N == 1: ### Example 1:
-        initialPositions = np.array([0.49]) 
+        initialPositions = np.array([0.5]) 
         b = np.array([1])
         
         
@@ -125,7 +125,7 @@ def setSources(M, background = showBackgr):
         sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
     
     elif M == 1: 
-        sources = np.array([0.49])
+        sources = np.array([0.55])
         
     
     else: # Evenly distribute given nr of sources
@@ -147,14 +147,14 @@ if autoCreation:
 
 
 # Optional other sources: 
-# sources = np.array([0.49])
+# sources = np.array([0.6])
 # sources = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
 # nrSources = len(sources)
 
 
 
 # %% FUNCTIONS
-def pairwiseDistance(x1, PBCs = True, x2 = None):
+def pairwiseDistance(x1, PBCs = False, x2 = None):
     """ Compute distances, optionally with PBCs
     
     Computes distances between all atoms, optionally for 
@@ -203,8 +203,8 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
 
     '''
     
-    np.fill_diagonal(dist, 1) # Set distance from particle to itself to (aritrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
-    chargeArray = b * b[:,np.newaxis] # Create matrix b_i b_j
+    np.fill_diagonal(dist, 1) # Set distance from particle to itself to (arbitrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
+    chargeArray = b * b[:,np.newaxis] # Create matrix (b_i b_j)_ij
     
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
@@ -212,7 +212,8 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
         distCorrected = dist**2 # Normalise to avoid computational problems at singularity. Square to normalise difference vector
         
         # interactions = -(1/diff) * chargeArray # Only in 1D; else need diff/dist
-    interactions = -(diff / distCorrected) * chargeArray 
+    
+    interactions = -(diff / distCorrected) * chargeArray # Calculates matrix b_i b_j / (x_i - x_j)
     interactions = np.nan_to_num(interactions) # Set NaNs to 0
     
     if regularisation == 'V1': 
@@ -253,6 +254,63 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
     f = np.sum(interactions, axis = 1) # Per source, sum contributions over all dislocs
     
     return f
+ 
+
+class Creation: 
+    def __init__(self, loc):
+        self.x = loc
+        self.idx = None
+        self.texc = None
+        self.Lnuc = None
+        self.creaTime = None
+    
+    
+    def create(self, loc, PK, N, t):
+        self.idx = N+1
+        self.creaTime = t
+        
+        if creaProc == 'lin': 
+            self.texc = 1/(4*np.abs(PK)**2) #Now preliminary fix by taking same texc as for zero-gamma
+            locs = np.array([loc - 0.5*collTres, loc + 0.5*collTres])
+        
+        elif creaProc == 'zero': 
+            self.texc = 1/(4*np.abs(PK)**2)
+            locs = np.array([loc - 0.5*collTres, loc + 0.5*collTres])
+        
+        elif creaProc == 'nuc':
+            self.Lnuc = 1/(2* PKNewCreations)
+            locs = np.array([loc - 0.5*Lnuc, loc + 0.5*Lnuc])
+        
+        charges = np.array([-1,1])*np.sign(PK)
+    
+    
+    def adjustForce(self, forces, t):
+        if creaProc == 'lin': 
+            adjForce = forces * (2*(t - self.creaTime)/self.texc - 1)
+        
+        elif creaProc == 'zero': 
+            adjForce = 0
+        
+        return adjForce
+            
+        
+    
+
+class Source: 
+    def __init__(self, loc):
+        self.pos = loc
+        self.tAboveThreshold = 0
+    
+        
+    def updateThresTime(self, PK, dt, N):
+        if (np.abs(PK) > Fnuc): 
+            self.tAboveThreshold += dt
+            if self.tAboveThreshold >= tnuc: 
+                loc = self.pos
+                Creation.create(loc, PK, N, t)
+                self.tAboveThreshold = 0
+        else: 
+            self.tAboveThreshold = 0
         
 
 # %% SIMULATION
@@ -285,11 +343,16 @@ while t < simTime:
     # Creation: 
     if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
         PK = PeachKoehler(sources, x, b, stress) 
+        
         if showBackgr: 
             PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
 
-        tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
-        tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
+        # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
+        # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
+        tresHist[PK >= Fnuc] += dt
+        tresHist[PK <= -Fnuc] += dt
+        tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
+        
         creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
         nrNewCreations = len(creations)
         PKNewCreations = PK[creations]
@@ -303,6 +366,8 @@ while t < simTime:
                 newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
             elif creaProc == 'zero': 
                 newExcTimes = 1/(4*PKNewCreations**2)
+            elif creaProc == 'nuc': 
+                Lnuc = 1/(2* PKNewCreations)
             
             if (creaProc == 'lin' or creaProc == 'zero'): 
                 creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
@@ -312,21 +377,23 @@ while t < simTime:
             
             #The following is a bit tedious, should be possible in a simpler way
             locs = np.zeros(nrNewDislocs)
-            if creaProc == 'nuc': 
+            if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
                 locs[::2] = sources[creations] - 0.5*Lnuc # Read as: every other element 
                 locs[1::2] = sources[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
             else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
                   #Instead, since we annihilate at collTres, we also take this for creation
-                locs[::2] = sources[creations] - 0.5*collTres 
-                locs[1::2] = sources[creations] + 0.5*collTres 
+                locs[::2] = sources[creations] - 0.6*collTres 
+                locs[1::2] = sources[creations] + 0.6*collTres 
             
             charges = np.zeros(nrNewDislocs)
-            print(np.sign(PKNewCreations))
+            
             for i in range(nrNewCreations):
                 sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
                 charges[2*i] = sign 
                 charges[2*i+1] = -sign 
             
+            print(locs)
+            print(t)
             
             x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
             b = np.append(b, charges)
@@ -447,7 +514,7 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
             x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
             pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1 # find jumps across domain caused by PBCs
             x_current = np.insert(x_current, pos, np.nan) # Insert NaNs in order not to draw jumps
-            y_new = np.insert(y, pos, np.nan) 
+            y_current = np.insert(y, pos, np.nan) 
             # Note that x[pos] = np.nan would work as well, but that would delete data
         
         plt.plot(x_current, y_current, c = colorDict.get(bInitial[i]))
