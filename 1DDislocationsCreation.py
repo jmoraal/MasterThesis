@@ -37,8 +37,6 @@ randomness = False  # Whether to add random noise to dislocation positions (norm
 sigma = 0.01        # Standard dev. of noise (volatility)
 sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
 collTres = 0.005    # Collision threshold; if particles are closer than this, they are considered collided
-manualCrea = False  # Whether to include manually appointed creation events
-creaExc = 0.1       # Time for which exception rule governs interaction between newly created dislocations. #TODO now still arbitrary threshold; should be adaptive!
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
@@ -51,7 +49,7 @@ domain = (0,1)      # Interval of space where initial dislocations and sources a
 
 
 def setExample(N): 
-    global initialPositions, b, creations, domain, initialNrParticles
+    global initialPositions, b, creations, initialNrParticles
         
     if N == -1: ### Empty example; requires some adaptions in code below (e.g. turn off 'no dislocations left' break)
         initialPositions = np.array([np.nan, np.nan]) 
@@ -62,32 +60,21 @@ def setExample(N):
         b = np.array([1, -1])    
     
     elif N == 1: ### Example 1:
-        initialPositions = np.array([0.21, 0.7, 0.8]) 
-        b = np.array([-1, 1, 1])
+        initialPositions = np.array([0.49]) 
+        b = np.array([1])
         
     
     elif N == 2: ### Example 2: manually appointed creation events
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         b = np.array([-1, -1, 1, 1, -1]) # Particle charges
-        # Creation time, place and 'orientation' (+/- charge order):
-        creations = np.array([[0.14, 0.5, 1, -1],
-                              [0.3, 0.2, 1, -1],
-                              [0.6, 0.5, 1, -1],
-                              [0.61, 0.1, 1, -1]])
-        # Format: time, loc, orient is (0.15, [0.5], [-1,1]). Not great, but easiest to keep overview for multiple creations
-        #TODO seems like having two creations occur at exact same time is not yet possible
+    
     
     elif N == 3: ### Example 3: # 10 randomly distributed dislocations (5+,5-), with arbitrary (but 'manual') creation events
         nrParticles = 10
         initialPositions = np.random.uniform(size = nrParticles, low = 0, high = 1)
         # 0/1 charges:
         b = np.random.choice((-1,1),nrParticles)
-        
-        nrCreations = 5
-        creations = np.zeros((nrCreations,4))
-        creations[:,0] = np.linspace(0,0.5*simTime, nrCreations) # Creation times; Last creation at 0.5 simTime to see equilibrium develop
-        creations[:,1] = np.random.uniform(size = nrCreations, low = 0, high = 1) # Locations. Needs to be adapted for multi-D
-        creations[:,2:] = np.random.choice((-1,1),nrCreations)[:,np.newaxis] * np.array([1,-1]) # Creation orientation, i.e. order of +/- charges
+    
     
     else: 
         initialPositions = np.random.uniform(size = N) 
@@ -99,7 +86,7 @@ def setExample(N):
     # Dependent paramaters (deducable from the ones defined above): 
     initialNrParticles = len(initialPositions)
 
-setExample(0)
+setExample(1)
 
 ### Create grid, e.g. as possible sources: 
 nrSources = 11
@@ -196,23 +183,12 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
 # %% SIMULATION
 
 ### Precomputation
-#nrSteps = int(simTime/dt) # Rounds fraction down to integer (floor)
 t = 0
-# if manualCrea: 
-#     nrCreations = 2 * len(creations) # At every creation time, two new dislocations are introduced
-#     nrParticles = initialNrParticles + nrCreations 
-#     creationSteps = np.append(np.floor(creations[:,0]/dt),0) #append 0 to 'know' last creation has happend
-#     creationCounter = 0
-#     stepsSinceCreation = np.ones(len(creations)) * -1 # Set to -1 to indicate creation has not happened yet; set to 0 at moment of creation
-#     exceptionSteps = int(creaExc / dt)
-#     b = np.append(b, np.zeros(nrCreations))
-# else: nrParticles = initialNrParticles
 stepSizes = []
 times = [0]
 
 trajectories = initialPositions[None,:] # Change shape into (1,len)
 x = np.copy(initialPositions)
-#x[0,initialNrParticles:] = np.nan # Effectively keeps particles out of system before creation
 
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
@@ -282,20 +258,7 @@ while t < simTime:
             trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
             
     #TODO case statement?    
-        
-    # if manualCrea and (k == creationSteps[creationCounter]): 
-    #     creationLocation = creations[creationCounter][1]
-    #     creationOrder = creations[creationCounter][-2:]
-        
-    #     idx = initialNrParticles + 2 * creationCounter
-    #     x[k, idx] = creationLocation - 0.5*Lnuc # Set location, distance of collision treshold apart
-    #     x[k, idx + 1] = creationLocation + 0.5*Lnuc 
-    #     b[idx : idx + 2] = creationOrder # Set charges as specified before
-    #     bInitial[idx : idx + 2] = creationOrder
-        
-    #     stepsSinceCreation[creationCounter] = 0
-    #     creationCounter += 1
-    #     print(f"Creation {creationCounter} took place")
+  
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
@@ -320,15 +283,6 @@ while t < simTime:
                 excTimes = excTimes[creaTrackers > 0] # Also remove corresponding exception times
             creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         
-    
-    # if manualCrea:
-    #     #TODO do we also need this for automatic creations, or is relation w/ shear stress etc. enough?
-    #     for i in range(len(creations)): #TODO unnecessarily time-consuming. Should be doable without loop (or at least not every iteration)
-    #         if (0 <= stepsSinceCreation[i] < exceptionSteps+1): # Idea: disable forces between new creation initially
-    #             idx = initialNrParticles + 2 * i
-    #             # Idea: make interaction forces slowly transition from -1 (opposite) to 1 (actual force)
-    #             interactions[idx : idx + 2,idx : idx + 2] *= -1.0 + 2*stepsSinceCreation[i]/exceptionSteps #1 - 2/(stepsSinceCreation[i] + 1) #TODO now still assumes creations are given in order of time. May want to make more robust
-    #             stepsSinceCreation[i] += 1
     
     
     ## Main update step: 
