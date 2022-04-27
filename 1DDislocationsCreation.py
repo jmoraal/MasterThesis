@@ -30,19 +30,18 @@ simTime = 0.5       # Total simulation time
 dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
 adaptiveTime = True # Whether to use adaptive timestep in integrator
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
+reg = 'cutoff'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
 eps = 0.01          # Regularisation parameter
-cutoff = 100         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
+cutoff = 50         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01        # Standard dev. of noise (volatility)
-sticky = True       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
+sticky = False       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
 collTres = 0.005#e-7    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 0.5    # Threshold for magnitude of Peach-Koehler force 
+Fnuc = 2    # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.1     # Threshold for duration of PK force magnitude before creation
-Lnuc = 2*collTres   # Distance at which new dipole is introduced. Must be larger than collision threshold, else dipole annihilates instantly
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False  # Whether to plot PK force field behind trajectories
 domain = (0,1)      # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
@@ -200,8 +199,6 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
     -------
     interactions : 2D numpy array (nxn)
         representing force pairs of particles exert on each other.
-    chargeArray : 2D numpy array (nxn)
-        array of pairwise charge products; not strictly necessary, but speeds up computation.
 
     '''
     
@@ -224,7 +221,7 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
     if regularisation == 'cutoff': 
         interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
     
-    return interactions, chargeArray
+    return interactions
 
     
 def projectParticles(x):
@@ -265,16 +262,17 @@ class Creation:
         self.creaTime = t
         self.idx = idx
         self.inProgress = True
+            
     
     
     def createDipole(self):
         
         if creaProc == 'lin': 
-            self.texc = 1/(4*np.abs(self.PKAtCrea)**2) #Now preliminary fix by taking same texc as for zero-gamma
+            self.texc = 1/(2*np.abs(self.PKAtCrea))**2 #Now preliminary fix by taking same texc as for zero-gamma
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
-            self.texc = 1/(4*np.abs(self.PKAtCrea)**2)
+            self.texc = 1/(2*np.abs(self.PKAtCrea))**2
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'nuc':
@@ -286,14 +284,14 @@ class Creation:
         return locs, charges
     
     
-    def adjustForce(self, forces, t):
+    def forceAdjustment(self, t):
         if creaProc == 'lin': 
-            adjForce = forces * (2*(t - self.creaTime)/self.texc - 1)
+            forceFact = (2*(t - self.creaTime)/self.texc - 1)
         
         elif creaProc == 'zero': 
-            adjForce = 0
-        
-        return adjForce
+            forceFact = 0
+            
+        return forceFact
     
     
     def exceptionCheck(self, t): 
@@ -341,13 +339,13 @@ if autoCreation:
         creations = [] 
         creationCounter = 0 # Counter of all creations that have occurred
     
-    else: 
-        tresHist = np.zeros(len(sourceLocs)) #threshold history; to measure how long the threshold was exceeded at certain source
-        creaTrackers = []
-        creaIdx = np.array([], dtype = 'int64')
-        #exceptionSteps = int(creaExc / dt)
-        if creaProc == 'lin': 
-            excTimes = []
+    # else: 
+    #     tresHist = np.zeros(len(sourceLocs)) #threshold history; to measure how long the threshold was exceeded at certain source
+    #     creaTrackers = []
+    #     creaIdx = np.array([], dtype = 'int64')
+    #     #exceptionSteps = int(creaExc / dt)
+    #     if creaProc == 'lin': 
+    #         excTimes = []
     
     if showBackgr: 
         PKlog = np.zeros((0,nrBackgrSrc))
@@ -376,54 +374,55 @@ while t < simTime:
                     locs = np.append(locs, dipLocs)
                     charges = np.append(charges, dipCharges)
                     creationCounter += 1
+
                 
                 
         
-        else: 
-            # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
-            # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
-            tresHist[PK >= Fnuc] += dt
-            tresHist[PK <= -Fnuc] += dt
-            tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
+        # else: 
+        #     # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
+        #     # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
+        #     tresHist[PK >= Fnuc] += dt
+        #     tresHist[PK <= -Fnuc] += dt
+        #     tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
             
-            creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
-            nrNewCreations = len(creations)
-            PKNewCreations = PK[creations]
-            nrNewDislocs = nrNewCreations * 2
-            if nrNewDislocs > 0:
-                tresHist[creations] = 0 # Reset counters of new creations
+        #     creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
+        #     nrNewCreations = len(creations)
+        #     PKNewCreations = PK[creations]
+        #     nrNewDislocs = nrNewCreations * 2
+        #     if nrNewDislocs > 0:
+        #         tresHist[creations] = 0 # Reset counters of new creations
                 
                 
-                # Set counters for exception time, to keep track of force exception:
-                if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
-                    newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
-                elif creaProc == 'zero': 
-                    newExcTimes = 1/(4*PKNewCreations**2)
-                elif creaProc == 'nuc': 
-                    Lnuc = 1/(2* PKNewCreations)
+        #         # Set counters for exception time, to keep track of force exception:
+        #         if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
+        #             newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
+        #         elif creaProc == 'zero': 
+        #             newExcTimes = 1/(4*PKNewCreations**2)
+        #         elif creaProc == 'nuc': 
+        #             Lnuc = 1/(2* PKNewCreations)
                 
-                if (creaProc == 'lin' or creaProc == 'zero'): 
-                    creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
-                    creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
-                if (creaProc == 'lin'): # For linear gamma creation, additionally:
-                    excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
+        #         if (creaProc == 'lin' or creaProc == 'zero'): 
+        #             creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
+        #             creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
+        #         if (creaProc == 'lin'): # For linear gamma creation, additionally:
+        #             excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
                 
-                #The following is a bit tedious, should be possible in a simpler way
-                locs = np.zeros(nrNewDislocs)
-                if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
-                    locs[::2] = sourceLocs[creations] - 0.5*Lnuc # Read as: every other element 
-                    locs[1::2] = sourceLocs[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-                else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
-                      #Instead, since we annihilate at collTres, we also take this for creation
-                    locs[::2] = sourceLocs[creations] - 0.6*collTres 
-                    locs[1::2] = sourceLocs[creations] + 0.6*collTres 
+        #         #The following is a bit tedious, should be possible in a simpler way
+        #         locs = np.zeros(nrNewDislocs)
+        #         if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
+        #             locs[::2] = sourceLocs[creations] - 0.5*Lnuc # Read as: every other element 
+        #             locs[1::2] = sourceLocs[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
+        #         else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
+        #               #Instead, since we annihilate at collTres, we also take this for creation
+        #             locs[::2] = sourceLocs[creations] - 0.6*collTres 
+        #             locs[1::2] = sourceLocs[creations] + 0.6*collTres 
                 
-                charges = np.zeros(nrNewDislocs)
+        #         charges = np.zeros(nrNewDislocs)
                 
-                for i in range(nrNewCreations):
-                    sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
-                    charges[2*i] = sign 
-                    charges[2*i+1] = -sign 
+        #         for i in range(nrNewCreations):
+        #             sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
+        #             charges[2*i] = sign 
+        #             charges[2*i+1] = -sign 
         
             
         x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
@@ -440,7 +439,24 @@ while t < simTime:
     
     # main forces/interaction: 
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
-    interactions, chargeArray = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
+    
+    
+    if sticky: 
+        tempDist = np.nan_to_num(dist, nan = 1000) + 1000*np.tril(np.ones((len(x),len(x)))) 
+        # Set nans and non-above-diagonal entries to arbitrary large number,  
+        # so that effectively all entries on and below diagonal are disregarded in comparison below
+        
+        collidedPairs = np.where((tempDist < collTres)) # Identifies pairs closer than collTres together. Format: ([parts A], [parts B]).
+        
+        
+        b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
+        b[collidedPairs[1]] = 0
+        x[collidedPairs[0]] = np.nan # Take annihilated particles out of system
+        x[collidedPairs[1]] = np.nan 
+        
+    
+    
+    interactions = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
@@ -449,31 +465,32 @@ while t < simTime:
             j = crea.idx
             # forces = interactions[j : j + 2, j : j + 2] #only creates link, not copy! 
             # forces = crea.adjustForce(forces, t)
-            interactions[j : j + 2, j : j + 2] = crea.adjustForce(interactions[j : j + 2, j : j + 2], t)
+            interactions[j : j + 2, j : j + 2] *= crea.forceAdjustment(t)
         
-    elif autoCreation and len(creaTrackers) > 0: 
-        if (creaProc == 'lin' or creaProc == 'zero'): 
-            for i in range(len(creaTrackers)): # For each recent creation...
-                idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
+    # elif autoCreation and len(creaTrackers) > 0: 
+    #     if (creaProc == 'lin' or creaProc == 'zero'): 
+    #         for i in range(len(creaTrackers)): # For each recent creation...
+    #             idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
                 
-                # Multiply interactions within new dipole by corresponding gamma(t) from report:
-                if creaProc == 'lin': 
-                    interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/excTimes[i] # linear transition from opposite force (factor -1) to actual force (1)
-                if creaProc == 'zero': 
-                    interactions[idx : idx + 2,idx : idx + 2] = 0
+    #             # Multiply interactions within new dipole by corresponding gamma(t) from report:
+    #             if creaProc == 'lin': 
+    #                 interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/excTimes[i] # linear transition from opposite force (factor -1) to actual force (1)
+    #             if creaProc == 'zero': 
+    #                 interactions[idx : idx + 2,idx : idx + 2] = 0
             
-            creaTrackers -= dt # Count down at all trackers
-            creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
-            if creaProc == 'lin': 
-                excTimes = excTimes[creaTrackers > 0] # Also remove corresponding exception times
-            creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
+    #         creaTrackers -= dt # Count down at all trackers
+    #         creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
+    #         if creaProc == 'lin': 
+    #             excTimes = excTimes[creaTrackers > 0] # Also remove corresponding exception times
+    #         creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
         
     
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
+    
     if adaptiveTime: 
-        dt = max(min(0.001/np.max(updates), 0.01),1e-10) # rudimentary adaptive timestep
+        dt = max(min(0.001/np.max(np.abs(updates)), 0.01),1e-10) # rudimentary adaptive timestep; always between (1e-10, 1e-3)
         stepSizes.append(dt)
     x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
     
@@ -493,31 +510,13 @@ while t < simTime:
         x_new = projectParticles(x_new) # Places particles back into box
     
     
-    if sticky: 
-        newDist = np.nan_to_num(pairwiseDistance(x_new, PBCs = PBCs)[1], nan = 1000) #TODO work around this, really don't want to calculate all distances twice!
-        # Sets nan to arbitrary large number
-        
-        # Idea: dist matrix is symmetric and we don't want the diagonal, so only take entries above diagonal. 
-        #       need to compare to threshold, so np.triu does not work since all others are set to 0
-        #       so set everything on and below diagonal to arbitrary large value
-        newDist += 1000*np.tril(np.ones((len(x_new),len(x_new)))) # Arbitrary large number, so that effectively all entries on and below diagonal are disregarded #TODO should this be x or x_new?
-        collidedPairs = np.where((newDist < collTres) & (chargeArray == -1)) # Format: ([parts A], [parts B]). Makes sure particles only annihilate if they have opposite charges
-        #TODO need something better than this construction! Does not facilitate three-particle collisions
-        
-        
-        b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
-        b[collidedPairs[1]] = 0
-        x_new[collidedPairs[0]] = np.nan # Take annihilated particles out of system
-        x_new[collidedPairs[1]] = np.nan 
-        
-    
     trajectories = np.append(trajectories, x_new[None,:], axis = 0)
     
     x = x_new
     t += dt
     times.append(t)
     
-    if((10*t/simTime) % 1 < 1e-6):
+    if((10*t/simTime) % 1 < 2*dt):
         print(f"{t:.5f} / {simTime}")
 
 
