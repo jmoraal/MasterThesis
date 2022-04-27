@@ -20,7 +20,6 @@ import time as timer
 #TODO Implement better integration scheme! Currently use forward Euler (originating from stochastic SDE approach) with improvised adaptive timestep
 #TODO Find reasonable parameters
 #TODO Use NaNs in position array to be more memory and time efficient (note that dist computation is O(n²)!)
-#TODO make sticky collisions faster! Now very inefficient
 #TODO adapt variable names to correspond to overleaf (or other way around)
 
 #%% INITIALISATION
@@ -35,10 +34,10 @@ eps = 0.01          # Regularisation parameter
 cutoff = 50         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01        # Standard dev. of noise (volatility)
-sticky = False       # Whether collisions are sticky, i.e. particles stay together once they collide (can probably be made standard)
+annihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
 collTres = 0.005#e-7    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
-autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
+autoCreation = False # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
 Fnuc = 2    # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.1     # Threshold for duration of PK force magnitude before creation
@@ -142,7 +141,7 @@ def setSources(M, background = showBackgr):
         backgrSrc = np.linspace(0,1, nrBackgrSrc)
 
 
-setExample(1)
+setExample(10)
 if autoCreation: 
     setSources(10)
 
@@ -382,18 +381,34 @@ while t < simTime:
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     
     
-    if sticky: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
+    if annihilation: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
         tempDist = np.nan_to_num(dist, nan = 1000) + 1000*np.tril(np.ones((len(x),len(x)))) 
         # Set nans and non-above-diagonal entries to arbitrary large number,  
         # so that effectively all entries on and below diagonal are disregarded in comparison below
         
-        collidedPairs = np.where((tempDist < collTres)) # Identifies pairs closer than collTres together. Format: ([parts A], [parts B]).
+        collPart1, collPart2 = np.where((tempDist < collTres)) # Identifies pairs closer than collTres together. Format: ([parts A], [parts B]).
+        # First fix: combine all overlapping pairs into dislocations. But note that this can let dislocations annihilate from arbitrarily far away...
+        # Note: looking at above-diagonal entries, all pairs are ordered w/ smallest index first. 
+        # But problem: it actually depends on which index you take first which ones annihilate...
         
+        for i in np.unique(collPart1): # Iterate over all particles involved in annihilation (1st in pair)
+            dislocGroup = collPart2[collPart1 == i] #Find all other particles i is close enough to
+            if len(dislocGroup) % 2 == 1:  #If even number of dislocs annihilate (so nr dislocs i annihilates with is odd), all end up with charge 0
+                b[i] = 0
+                x[i] = np.nan
+            else: # In other cases, one disloc ends up with remaining charge and set to average position of annihilating dislocs.
+                b[i] = np.sum(b[dislocGroup]) + b[i] #give i remaining charge (i is arbitrary choice; does not matter for solution)
+                x[i] = np.average(np.append(x[dislocGroup], x[i]))
+            
+            b[dislocGroup] = 0 #Set charges of all others to 0
+            x[dislocGroup] = np.nan #Remove from system
+            
+            
         
-        b[collidedPairs[0]] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
-        b[collidedPairs[1]] = 0
-        x[collidedPairs[0]] = np.nan # Take annihilated particles out of system
-        x[collidedPairs[1]] = np.nan 
+        # b[collPart1] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
+        # b[collPart2] = 0
+        # x[collPart1] = np.nan # Take annihilated particles out of system
+        # x[collPart2] = np.nan 
         
     
     
