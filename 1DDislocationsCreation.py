@@ -333,20 +333,11 @@ x = np.copy(initialPositions)
 
 bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
 
-if autoCreation: 
-    if classes: # Initialise sources and store classes in list
-        sources = [Source(x) for x in sourceLocs]
-        creations = [] 
-        creationCounter = 0 # Counter of all creations that have occurred
-    
-    # else: 
-    #     tresHist = np.zeros(len(sourceLocs)) #threshold history; to measure how long the threshold was exceeded at certain source
-    #     creaTrackers = []
-    #     creaIdx = np.array([], dtype = 'int64')
-    #     #exceptionSteps = int(creaExc / dt)
-    #     if creaProc == 'lin': 
-    #         excTimes = []
-    
+if autoCreation: # Initialise sources and store classes in list
+    sources = [Source(x) for x in sourceLocs]
+    creations = [] 
+    creationCounter = 0 # Counter of all creations that have occurred
+        
     if showBackgr: 
         PKlog = np.zeros((0,nrBackgrSrc))
 
@@ -361,70 +352,21 @@ while t < simTime:
         if showBackgr: 
             PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
         
-        if classes: 
-            locs = []
-            charges = []
-            
-            for i,src in enumerate(sources): 
-                thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
-                if thresReached: # If threshold is reached, initiate creation procedure: 
-                    newCrea = Creation(src.pos, PK[i], t, len(x) + creationCounter) # Initialise Creation
-                    creations.append(newCrea) # Append to  list of current creations
-                    dipLocs, dipCharges = Creation.createDipole(newCrea)
-                    locs = np.append(locs, dipLocs)
-                    charges = np.append(charges, dipCharges)
-                    creationCounter += 1
+        locs = []
+        charges = []
+        
+        for i,src in enumerate(sources): 
+            thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
+            if thresReached: # If threshold is reached, initiate creation procedure: 
+                newCrea = Creation(src.pos, PK[i], t, len(x) + creationCounter) # Initialise Creation
+                creations.append(newCrea) # Append to  list of current creations
+                dipLocs, dipCharges = Creation.createDipole(newCrea)
+                locs = np.append(locs, dipLocs)
+                charges = np.append(charges, dipCharges)
+                creationCounter += 1
 
-                
-                
         
-        # else: 
-        #     # tresHist[np.abs(PK) >= Fnuc] += dt # Increment all history counters reaching Peach-Koehler force threshold by dt
-        #     # tresHist[np.abs(PK) < Fnuc] = 0 # Set all others to 0
-        #     tresHist[PK >= Fnuc] += dt
-        #     tresHist[PK <= -Fnuc] += dt
-        #     tresHist[(PK < Fnuc) & (PK > -Fnuc)] = 0
-            
-        #     creations = np.where(tresHist >= tnuc)[0] # Identify which sources reached time threshold (automatically reached force threshold too). [0] to 'unpack' array from tuple
-        #     nrNewCreations = len(creations)
-        #     PKNewCreations = PK[creations]
-        #     nrNewDislocs = nrNewCreations * 2
-        #     if nrNewDislocs > 0:
-        #         tresHist[creations] = 0 # Reset counters of new creations
-                
-                
-        #         # Set counters for exception time, to keep track of force exception:
-        #         if creaProc == 'lin': #TODO need zeros of Rcrit from ODEPhaseplot here! 
-        #             newExcTimes = 1/(4*PKNewCreations**2) #Now preliminary fix by taking same texc as for zero-gamma
-        #         elif creaProc == 'zero': 
-        #             newExcTimes = 1/(4*PKNewCreations**2)
-        #         elif creaProc == 'nuc': 
-        #             Lnuc = 1/(2* PKNewCreations)
-                
-        #         if (creaProc == 'lin' or creaProc == 'zero'): 
-        #             creaTrackers = np.append(creaTrackers, newExcTimes) # Set counters to count down from exception time
-        #             creaIdx = np.append(creaIdx, len(x) + np.arange(nrNewCreations)*2) # Keep track for which dislocations these are; keep 1st index of every pair
-        #         if (creaProc == 'lin'): # For linear gamma creation, additionally:
-        #             excTimes = np.append(excTimes, newExcTimes) # store exception times for linear gamma (actual function depends on this)
-                
-        #         #The following is a bit tedious, should be possible in a simpler way
-        #         locs = np.zeros(nrNewDislocs)
-        #         if creaProc == 'nuc': #Compute creation locations for all new dipoles: 
-        #             locs[::2] = sourceLocs[creations] - 0.5*Lnuc # Read as: every other element 
-        #             locs[1::2] = sourceLocs[creations] + 0.5*Lnuc # Read as: every other element, starting at 1
-        #         else: # for gamma-creation, should have creation in exact same location, but this is computationally impossible. 
-        #               #Instead, since we annihilate at collTres, we also take this for creation
-        #             locs[::2] = sourceLocs[creations] - 0.6*collTres 
-        #             locs[1::2] = sourceLocs[creations] + 0.6*collTres 
-                
-        #         charges = np.zeros(nrNewDislocs)
-                
-        #         for i in range(nrNewCreations):
-        #             sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
-        #             charges[2*i] = sign 
-        #             charges[2*i+1] = -sign 
-        
-            
+
         x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
         b = np.append(b, charges)
         bInitial = np.append(bInitial, charges) #For correct plot colours
@@ -433,7 +375,6 @@ while t < simTime:
         # Remove Creations that have no force exception (anymore) from list: 
         for crea in creations: 
             crea.exceptionCheck(t)
-        
         creations = [crea for crea in creations if crea.inProgress]  
   
     
@@ -441,7 +382,7 @@ while t < simTime:
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     
     
-    if sticky: 
+    if sticky: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
         tempDist = np.nan_to_num(dist, nan = 1000) + 1000*np.tril(np.ones((len(x),len(x)))) 
         # Set nans and non-above-diagonal entries to arbitrary large number,  
         # so that effectively all entries on and below diagonal are disregarded in comparison below
@@ -460,31 +401,13 @@ while t < simTime:
     
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
-    if classes: 
+    if autoCreation: 
         for crea in creations: # 'creations' now only contains pairs with force exception
             j = crea.idx
             # forces = interactions[j : j + 2, j : j + 2] #only creates link, not copy! 
             # forces = crea.adjustForce(forces, t)
             interactions[j : j + 2, j : j + 2] *= crea.forceAdjustment(t)
         
-    # elif autoCreation and len(creaTrackers) > 0: 
-    #     if (creaProc == 'lin' or creaProc == 'zero'): 
-    #         for i in range(len(creaTrackers)): # For each recent creation...
-    #             idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
-                
-    #             # Multiply interactions within new dipole by corresponding gamma(t) from report:
-    #             if creaProc == 'lin': 
-    #                 interactions[idx : idx + 2,idx : idx + 2] *= 1.0 - 2*creaTrackers[i]/excTimes[i] # linear transition from opposite force (factor -1) to actual force (1)
-    #             if creaProc == 'zero': 
-    #                 interactions[idx : idx + 2,idx : idx + 2] = 0
-            
-    #         creaTrackers -= dt # Count down at all trackers
-    #         creaIdx = creaIdx[creaTrackers > 0] # And remove corresponding indices, so that Idx[i] still corresponds to Tracker[i]
-    #         if creaProc == 'lin': 
-    #             excTimes = excTimes[creaTrackers > 0] # Also remove corresponding exception times
-    #         creaTrackers = creaTrackers[creaTrackers > 0] # Remove those from list that reach 0
-        
-    
     
     ## Main update step: 
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
