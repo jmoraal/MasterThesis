@@ -155,7 +155,7 @@ if autoCreation:
 
 
 
-# %% FUNCTIONS
+# %% DEFINITIONS
 def pairwiseDistance(x1, PBCs = False, x2 = None):
     """ Compute distances, optionally with PBCs
     
@@ -259,31 +259,31 @@ def PeachKoehler(sources, x, b, stress, regularisation = 'eps'):
  
 
 class Creation: 
-    def __init__(self, loc):
-        self.x = loc
-        self.idx = None
-        self.texc = None
-        self.Lnuc = None
-        self.creaTime = None
-    
-    
-    def create(self, loc, PK, t, N):
-        self.idx = N+1
+    def __init__(self, loc, PK, t, idx):
+        self.loc = loc
+        self.PKAtCrea = PK
         self.creaTime = t
+        self.idx = idx
+        self.inProgress = True
+    
+    
+    def createDipole(self):
         
         if creaProc == 'lin': 
-            self.texc = 1/(4*np.abs(PK)**2) #Now preliminary fix by taking same texc as for zero-gamma
-            locs = np.array([loc - 0.5*collTres, loc + 0.5*collTres])
+            self.texc = 1/(4*np.abs(self.PK)**2) #Now preliminary fix by taking same texc as for zero-gamma
+            locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
-            self.texc = 1/(4*np.abs(PK)**2)
-            locs = np.array([loc - 0.5*collTres, loc + 0.5*collTres])
+            self.texc = 1/(4*np.abs(self.PK)**2)
+            locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'nuc':
-            self.Lnuc = 1/(2* PKNewCreations)
-            locs = np.array([loc - 0.5*Lnuc, loc + 0.5*Lnuc])
+            self.Lnuc = 1/(2* self.PK)
+            locs = np.array([self.loc - 0.5*Lnuc, self.loc + 0.5*Lnuc])
         
-        charges = np.array([-1,1])*np.sign(PK)
+        charges = np.array([-1,1])*np.sign(self.PK)
+        
+        return locs, charges
     
     
     def adjustForce(self, forces, t):
@@ -294,7 +294,16 @@ class Creation:
             adjForce = 0
         
         return adjForce
-            
+    
+    
+    def exceptionCheck(self, t): 
+        
+        if (creaProc == 'lin') or (creaProc == 'zero'): 
+            if t > self.creaTime + self.texc: 
+                self.inProgress = False 
+        elif creaProc == 'nuc':
+            self.inProgress = False
+    
 
 
 
@@ -329,8 +338,8 @@ bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a r
 if autoCreation: 
     if classes: # Initialise sources and store classes in list
         sources = [Source(x) for x in sources]
-        creations = []
-        creationCounter = 0
+        creations = [] 
+        creationCounter = 0 # Counter of all creations that have occurred
     
     else: 
         tresHist = np.zeros(len(sources)) #threshold history; to measure how long the threshold was exceeded at certain source
@@ -355,11 +364,18 @@ while t < simTime:
             PKlog = np.append(PKlog, PeachKoehler(backgrSrc, x,b,stress)) # Save all PK forces to visualise
         
         if classes: 
-            for i in len(sources): 
-                thresReached = sources[i].updateThresTime(PK[i], dt, len(x))
-                if thresReached: 
+            locs = []
+            charges = []
+            
+            for i,src in enumerate(sources): 
+                thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
+                if thresReached: # If threshold is reached, initiate creation procedure: 
+                    newCrea = Creation(src.pos, PK[i], t, len(x) + creationCounter) # Initialise Creation
+                    creations.append(newCrea) # Append to  list of current creations
+                    dipLocs, dipCharges = Creation.createDipole(newCrea)
+                    locs = np.append(locs, dipLocs)
+                    charges = np.append(charges, dipCharges)
                     creationCounter += 1
-                    creations.append(Creation(sources[i].pos, PK[i], t, len(x) + len(creations)))
                 
                 
         
@@ -408,16 +424,18 @@ while t < simTime:
                     sign = np.sign(PKNewCreations[i]) # Index from 'creations' because PK is computed for all sources, not only new creations
                     charges[2*i] = sign 
                     charges[2*i+1] = -sign 
-                
-                print(locs)
-                print(t)
+        
             
         x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
         b = np.append(b, charges)
         bInitial = np.append(bInitial, charges) #For correct plot colours
         trajectories = np.append(trajectories, np.zeros((len(trajectories), nrNewDislocs))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
-            
-    #TODO case statement?    
+        
+        # Remove Creations that have no force exception (anymore) from list: 
+        for crea in creations: 
+            crea.exceptionCheck(t)
+        
+        creations = [crea for crea in creations if crea.inProgress]  
   
     
     # main forces/interaction: 
@@ -426,7 +444,13 @@ while t < simTime:
     
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
-    if autoCreation and len(creaTrackers) > 0: 
+    if classes: 
+        for crea in creations: 
+            j = crea.idx
+            forces = interactions[j : j + 2, j : j + 2] #only creates link, not copy! 
+            forces = crea.adjustForce(forces, t)
+        
+    elif autoCreation and len(creaTrackers) > 0: 
         if (creaProc == 'lin' or creaProc == 'zero'): 
             for i in range(len(creaTrackers)): # For each recent creation...
                 idx = initialNrParticles + 2 * creaIdx[i] #... select corresponding particle index
