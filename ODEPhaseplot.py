@@ -66,7 +66,7 @@ def fprime(t, R, texc = texc):
     return -f(texc - t, R, texc = texc)
 
 
-def critical(F, texc = texc, plot = False): 
+def critical(F, texc, plot = False): 
     global critR, thres
     
     thres = np.reshape(1/(2*F**2), (1,)) # Reshape is technicality, to account both for case where F is given as 'c' or '[c]'
@@ -122,7 +122,7 @@ def plotPhaseVF():
 
 def plotAll(): 
     plotFeatures()
-    critical(F, plot = True)
+    critical(F, texc, plot = True)
     plotSols()
     plotPhaseVF()
 
@@ -141,7 +141,7 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
     for j in range(M): 
         texc = ts[j]
         for i in range(N): 
-            crits[j,i] = critical(Fs[i], texc = texc)
+            crits[j,i] = critical(Fs[i], texc)
         
         Rs = crits[j,:] 
         Rs[Rs < 0] = np.nan #remove negative values (only there so solver works more easily)
@@ -172,14 +172,14 @@ def FzeroSolver(tmin, tmax, M, method):
     for j in range(M): 
         texc = ts[j]
         if method == 'fsolve': 
-            x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True) # use 'args = ...' kwarg?
+            x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True, args = (texc,)) 
             Fzeros[j] = x
             # print(x, critical(x))
             
             reachedSol[j] = (ier == 1)
                 
         if method == 'root': 
-            sol = root(critical, 0.5/texc, method = 'broyden1')
+            sol = root(critical, 0.5/texc, method = 'broyden1', args = texc)
             Fzeros[j] = sol.x
             reachedSol[j] = sol.success
             
@@ -205,20 +205,20 @@ def FzeroSolver(tmin, tmax, M, method):
 # plotAll() # Phase-space, trajectories & vector field
 
 
-Fmin = 0.2
-Fmax = 10
-N = 100
-
-tmin = 0.2
-tmax = 1
-M = 5
-initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
-
+# Fmin = 0.2
+# Fmax = 10
+# N = 100
 
 # tmin = 0.2
-# tmax = 0.6
-# M = 100
-# # method = 'root'  #very slow, but seems accurate
-# method = 'fsolve' # fast but error-prone
-# FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
+# tmax = 1
+# M = 5
+# initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
+
+
+tmin = 0.2
+tmax = 0.6
+M = 100
+# method = 'root'  #very slow, but seems accurate
+method = 'fsolve' # fast but error-prone
+FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
 
