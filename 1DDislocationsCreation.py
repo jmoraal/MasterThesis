@@ -26,21 +26,21 @@ import time as timer
 
 ### Simulation settings
 simTime = 0.5       # Total simulation time
-dt = 0.0005         # Timestep for discretisation (or initial, if adaptive timestep)
+dt = 0.0005         # Timestep for discretisation (or maximum, if adaptive timestep)
 adaptiveTime = True # Whether to use adaptive timestep in integrator
 PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'cutoff'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
 eps = 0.01          # Regularisation parameter
-cutoff = 50         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
+cutoff = 200         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01        # Standard dev. of noise (volatility)
 annihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
-collTres = 0.005#e-7    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
+collTres = 1e-3    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
-autoCreation = False # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
+autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 2    # Threshold for magnitude of Peach-Koehler force 
-tnuc = 0.1     # Threshold for duration of PK force magnitude before creation
+Fnuc = 3    # Threshold for magnitude of Peach-Koehler force 
+tnuc = 0.002     # Threshold for duration of PK force magnitude before creation
 drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False  # Whether to plot PK force field behind trajectories
 domain = (0,1)      # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
@@ -143,13 +143,17 @@ def setSources(M, background = showBackgr):
 
 setExample(10)
 if autoCreation: 
-    setSources(10)
+    setSources(12)
 
 
-# Optional other sources: 
-# sourceLocs = np.array([0.6])
-# sourceLocs = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
-# nrSources = len(sourceLocs)
+# Additional comparison case (randomly generated but fixed): 
+initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
+       0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
+b = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
+nrSources = len(sourceLocs)
+initialNrParticles = len(initialPositions)
+
 
 
 
@@ -175,6 +179,7 @@ def pairwiseDistance(x1, PBCs = False, x2 = None):
     dist = np.abs(diff) # Compute length of difference vectors (in 1D, else use linalg.norm w/ axis=2)
     
     return diff, dist
+
 
 
 def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
@@ -222,7 +227,8 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
     
     return interactions
 
-    
+
+
 def projectParticles(x):
     """Projects particles into box of given size."""
     
@@ -254,6 +260,7 @@ def PeachKoehler(sourceLocs, x, b, stress, regularisation = 'eps'):
     return f
  
 
+
 class Creation: 
     def __init__(self, loc, PK, t, idx):
         self.loc = loc
@@ -262,7 +269,6 @@ class Creation:
         self.idx = idx
         self.inProgress = True
             
-    
     
     def createDipole(self):
         
@@ -289,7 +295,7 @@ class Creation:
         
         elif creaProc == 'zero': 
             forceFact = 0
-            
+        
         return forceFact
     
     
@@ -301,7 +307,6 @@ class Creation:
         elif creaProc == 'nuc':
             self.inProgress = False
     
-
 
 
 class Source: 
@@ -357,7 +362,7 @@ while t < simTime:
         for i,src in enumerate(sources): 
             thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
             if thresReached: # If threshold is reached, initiate creation procedure: 
-                newCrea = Creation(src.pos, PK[i], t, len(x) + creationCounter) # Initialise Creation
+                newCrea = Creation(src.pos, PK[i], t, len(x) + 2*creationCounter) # Initialise Creation
                 creations.append(newCrea) # Append to  list of current creations
                 dipLocs, dipCharges = Creation.createDipole(newCrea)
                 locs = np.append(locs, dipLocs)
@@ -374,6 +379,7 @@ while t < simTime:
         # Remove Creations that have no force exception (anymore) from list: 
         for crea in creations: 
             crea.exceptionCheck(t)
+        
         creations = [crea for crea in creations if crea.inProgress]  
   
     
@@ -402,14 +408,6 @@ while t < simTime:
             
             b[dislocGroup] = 0 #Set charges of all others to 0
             x[dislocGroup] = np.nan #Remove from system
-            
-            
-        
-        # b[collPart1] = 0 # If non-integer charges: take (b[collidedPairs[0]] + b[collidedPairs[1]])/2
-        # b[collPart2] = 0
-        # x[collPart1] = np.nan # Take annihilated particles out of system
-        # x[collPart2] = np.nan 
-        
     
     
     interactions = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
@@ -419,8 +417,6 @@ while t < simTime:
     if autoCreation: 
         for crea in creations: # 'creations' now only contains pairs with force exception
             j = crea.idx
-            # forces = interactions[j : j + 2, j : j + 2] #only creates link, not copy! 
-            # forces = crea.adjustForce(forces, t)
             interactions[j : j + 2, j : j + 2] *= crea.forceAdjustment(t)
         
     
@@ -428,8 +424,9 @@ while t < simTime:
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
     
     if adaptiveTime: 
-        dt = max(min(0.001/np.max(np.abs(updates)), 0.01),1e-10) # rudimentary adaptive timestep; always between (1e-10, 1e-3)
+        dt = max(min(0.001/np.max(np.abs(updates)), dt),1e-10) # rudimentary adaptive timestep; always between (1e-10, dt)
         stepSizes.append(dt)
+    
     x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
     
     # Stop simulation if all dislocations have annihilated:
