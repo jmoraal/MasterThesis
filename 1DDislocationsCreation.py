@@ -25,27 +25,26 @@ import time as timer
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 0.5       # Total simulation time
-dt = 0.0005         # Timestep for discretisation (or maximum, if adaptive timestep)
-adaptiveTime = True # Whether to use adaptive timestep in integrator
-PBCs = False        # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'cutoff'        # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
-eps = 0.01          # Regularisation parameter
-cutoff = 200         # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
-randomness = False  # Whether to add random noise to dislocation positions (normal distr.)
-sigma = 0.01        # Standard dev. of noise (volatility)
-annihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
-collTres = 1e-3    # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
-stress = 0          # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
-autoCreation = True # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
-creaProc = 'zero'    # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 3    # Threshold for magnitude of Peach-Koehler force 
-tnuc = 0.002     # Threshold for duration of PK force magnitude before creation
-drag = 1            # Multiplicative factor; only scales time I believe (and possibly external force)
-showBackgr = False  # Whether to plot PK force field behind trajectories
-domain = (0,1)      # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
+simTime = 0.5           # Total simulation time
+dt = 0.001              # Timestep for discretisation (or maximum, if adaptive timestep)
+adaptiveTime = True     # Whether to use adaptive timestep in integrator
+PBCs = False            # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
+reg = 'cutoff'          # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
+eps = 0.01              # Regularisation parameter
+cutoff = 200            # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
+randomness = False      # Whether to add random noise to dislocation positions (normal distr.)
+sigma = 0.01            # Standard dev. of noise (volatility)
+withAnnihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
+collTres = 1e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
+stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
+withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
+creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
+Fnuc = 10               # Threshold for magnitude of Peach-Koehler force 
+tnuc = 0.001            # Threshold for duration of PK force magnitude before creation
+drag = 1                # Multiplicative factor; only scales time I believe (and possibly external force)
+showBackgr = False      # Whether to plot PK force field behind trajectories
+domain = (0,1)          # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
 
-classes = True # temporary variable to test object-oriented creation procedure
 
 
 def setExample(N): 
@@ -63,35 +62,35 @@ def setExample(N):
     None (sets global variables).
 
     '''
-    global initialPositions, b, initialNrParticles
+    global initialPositions, initialCharges, initialNrParticles
     
     if N == 0: ### Empty example; requires some adaptions in code below (e.g. turn off 'no dislocations left' break)
         initialPositions = np.array([np.nan, np.nan]) 
-        b = np.array([1, -1])    
+        initialCharges = np.array([1, -1])    
     
     
     elif N == 1: ### Example 1:
         initialPositions = np.array([0.5]) 
-        b = np.array([1])
+        initialCharges = np.array([1])
         
         
     elif N == 2: ### Example 2: 
         initialPositions = np.array([0.3, 0.75]) # If they are _exactly_ 0.5 apart, PBC distance starts acting up; difference vectors are then equal ipv opposite
-        b = np.array([1, -1])    
+        initialCharges = np.array([1, -1])    
     
     
     elif N == 5: ### Example 3: 
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
-        b = np.array([-1, -1, 1, 1, -1]) # Particle charges
+        initialCharges = np.array([-1, -1, 1, 1, -1]) # Particle charges
     
         
     else: ### Given nr of particles, and option
         initialPositions = np.random.uniform(size = N) 
-        b = np.ones(N)
+        initialCharges = np.ones(N)
         neg = np.random.choice(range(N),N//2, replace=False) #pick floor(N/2) indices at random
-        b[neg] = -1 # Set half of charges to -1, rest remains 1
+        initialCharges[neg] = -1 # Set half of charges to -1, rest remains 1
         # note: different from completely random charges, which would be the following: 
-        # b = np.random.choice((-1,1),nrParticles)
+        # initialCharges = np.random.choice((-1,1),nrParticles)
     
     
     # Dependent paramaters (deducable from the ones defined above): 
@@ -142,14 +141,14 @@ def setSources(M, background = showBackgr):
 
 
 setExample(10)
-if autoCreation: 
+if withCreation: 
     setSources(12)
 
 
 # Additional comparison case (randomly generated but fixed): 
 initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
        0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
-b = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
 sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
 nrSources = len(sourceLocs)
 initialNrParticles = len(initialPositions)
@@ -261,6 +260,23 @@ def PeachKoehler(sourceLocs, x, b, stress, regularisation = 'eps'):
  
 
 
+class Source: 
+    def __init__(self, loc):
+        self.pos = loc
+        self.tAboveThreshold = 0
+    
+        
+    def updateThresTime(self, PK, dt, N):
+        if (np.abs(PK) > Fnuc): 
+            self.tAboveThreshold += dt
+            if self.tAboveThreshold >= tnuc: 
+                self.tAboveThreshold = 0
+                return True
+        else: 
+            self.tAboveThreshold = 0
+        
+
+
 class Creation: 
     def __init__(self, loc, PK, t, idx):
         self.loc = loc
@@ -273,7 +289,7 @@ class Creation:
     def createDipole(self):
         
         if creaProc == 'lin': 
-            self.texc = 1/(2*np.abs(self.PKAtCrea))**2 #Now preliminary fix by taking same texc as for zero-gamma
+            self.texc = 1/(2*np.abs(self.PKAtCrea))**2 #TODO Now preliminary fix by taking same texc as for zero-gamma
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
@@ -306,24 +322,14 @@ class Creation:
                 self.inProgress = False 
         elif creaProc == 'nuc':
             self.inProgress = False
-    
 
 
-class Source: 
-    def __init__(self, loc):
-        self.pos = loc
-        self.tAboveThreshold = 0
-    
+class Annihilation: 
+    def __init__(self, annTime, dislocs):
+        self.annTime = annTime
+        self.dislocs = dislocs
         
-    def updateThresTime(self, PK, dt, N):
-        if (np.abs(PK) > Fnuc): 
-            self.tAboveThreshold += dt
-            if self.tAboveThreshold >= tnuc: 
-                self.tAboveThreshold = 0
-                return True
-        else: 
-            self.tAboveThreshold = 0
-        
+
 
 # %% SIMULATION
 
@@ -333,14 +339,15 @@ stepSizes = []
 times = [0]
 
 trajectories = initialPositions[None,:] # Change shape into (1,len)
-x = np.copy(initialPositions)
+x = np.copy(initialPositions) # 'copy' to create new array; otherwise, x is just a reference (and changes if initialPositions changes)
+b = np.copy(initialCharges) # 'copy' to create new array; otherwise, b is just a reference (and changes if initialCharges changes)
 
-bInitial = np.copy(b) #copy to create new array; otherwise, bInitial is just a reference (and changes if b changes)
+annihilations = [] # To keep track of all annihilation events (only for analysis afterwards)
 
-if autoCreation: # Initialise sources and store classes in list
-    sources = [Source(x) for x in sourceLocs]
-    creations = [] 
-    creationCounter = 0 # Counter of all creations that have occurred
+if withCreation: # Initialise sources and store classes in list
+    sources = [Source(x) for x in sourceLocs] # Initialise source classes and store in list
+    creations = []  # List of _all_ creations occurring at some point in entire system (only for analysis afterwards)
+    currentCreations = [] # List to keep track of creations for which exception holds
         
     if showBackgr: 
         PKlog = np.zeros((0,nrBackgrSrc))
@@ -350,7 +357,7 @@ simStartTime = timer.time() # To measure simulation computation time
 ### Simulation loop
 while t < simTime: 
     # Creation: 
-    if autoCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
+    if withCreation: # Idea: if force at source exceeds threshold for certain time, new dipole is created
         PK = PeachKoehler(sourceLocs, x, b, stress) 
         
         if showBackgr: 
@@ -362,32 +369,30 @@ while t < simTime:
         for i,src in enumerate(sources): 
             thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
             if thresReached: # If threshold is reached, initiate creation procedure: 
-                newCrea = Creation(src.pos, PK[i], t, len(x) + 2*creationCounter) # Initialise Creation
-                creations.append(newCrea) # Append to  list of current creations
-                dipLocs, dipCharges = Creation.createDipole(newCrea)
-                locs = np.append(locs, dipLocs)
-                charges = np.append(charges, dipCharges)
-                creationCounter += 1
+                newCrea = Creation(src.pos, PK[i], t, len(x) + 2*len(creations)) # Initialise Creation
+                creations.append(newCrea) # Append to  list of all creations
+                currentCreations.append(newCrea) # Append to  list of current creations
+                locs, charges = Creation.createDipole(newCrea) # Obtain corresponding dipole locations and charges
+                x = np.append(x, locs) # Add new dipole to position vector
+                b = np.append(b, charges) # Add new dipole to charge vector
 
+                initialCharges = np.append(initialCharges, charges) # Store charges of new For correct plot colours
+                trajectories = np.append(trajectories, np.zeros((len(trajectories), len(locs)))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
         
-
-        x = np.append(x, locs) # replace added NaNs by creation locations for current timestep
-        b = np.append(b, charges)
-        bInitial = np.append(bInitial, charges) #For correct plot colours
-        trajectories = np.append(trajectories, np.zeros((len(trajectories), len(locs)))*np.nan, axis = 1) #extend _entire_ position array (over all timesteps) with NaNs. #TODO can we predict a maximum a priori? May be faster than repeatedly appending
         
-        # Remove Creations that have no force exception (anymore) from list: 
-        for crea in creations: 
+        # Check whether creations still have exception: 
+        for crea in currentCreations: 
             crea.exceptionCheck(t)
         
-        creations = [crea for crea in creations if crea.inProgress]  
+        # Remove Creations that have no force exception (anymore) from list: 
+        currentCreations = [crea for crea in currentCreations if crea.inProgress]  
   
     
-    # main forces/interaction: 
+    # Compute main forces/interaction: 
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     
     
-    if annihilation: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
+    if withAnnihilation: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
         tempDist = np.nan_to_num(dist, nan = 1000) + 1000*np.tril(np.ones((len(x),len(x)))) 
         # Set nans and non-above-diagonal entries to arbitrary large number,  
         # so that effectively all entries on and below diagonal are disregarded in comparison below
@@ -408,14 +413,16 @@ while t < simTime:
             
             b[dislocGroup] = 0 #Set charges of all others to 0
             x[dislocGroup] = np.nan #Remove from system
+            
+            annihilations.append(Annihilation(t, np.append(dislocGroup,i)))
     
     
     interactions = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
         
     # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
-    if autoCreation: 
-        for crea in creations: # 'creations' now only contains pairs with force exception
+    if withCreation: 
+        for crea in currentCreations: # 'creations' now only contains pairs with force exception
             j = crea.idx
             interactions[j : j + 2, j : j + 2] *= crea.forceAdjustment(t)
         
@@ -429,27 +436,28 @@ while t < simTime:
     
     x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
     
-    # Stop simulation if all dislocations have annihilated:
-    # (in this case PK=0, so no creations can occur anymore either)
-    if np.isnan(x_new).all():
-        print('No dislocations left')
-        break
-    
-    
     if randomness: 
-        random = sigma * np.random.normal(size = len(x)) # 'noise' part
+        random = sigma * np.random.normal(size = len(x)) # Random part of update
         x_new += random * np.sqrt(dt) 
     
     
     if PBCs: 
         x_new = projectParticles(x_new) # Places particles back into box
     
+    trajectories = np.append(trajectories, x_new[None,:], axis = 0) # Store all positions for visualisation
     
-    trajectories = np.append(trajectories, x_new[None,:], axis = 0)
     
     x = x_new
     t += dt
     times.append(t)
+    
+    
+    # Stop simulation if all dislocations have annihilated:
+    # (in this case PK=0, so no creations can occur anymore either)
+    if np.isnan(x_new).all():
+        print('No dislocations left')
+        break # Breaks from outer 'while'-loop
+    
     
     if((10*t/simTime) % 1 < 2*dt):
         print(f"{t:.5f} / {simTime}")
@@ -507,7 +515,41 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
             plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
         #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
+
+
+def printSummary(): 
+    global nrRecollided, annDislocs, creaDislocs, overlap
+    print("Total nr of Creations: ", len(creations))
+    if t < simTime: 
+        print("Total annihilation time: ", t)
+    else: 
+        print("Total annihilation time: not reached")
+    
+    
+    # See how many created dipoles recollided: 
+    annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work if three or more dislocs annihilate! 
+    creaDislocs = np.zeros((len(creations),2))
+    nrRecollided = 0
+    for i,ann in enumerate(annihilations): 
+        annDislocs[i,:] = np.sort(ann.dislocs) #sort on lower index first to ease comparison below
+    
+    for i,crea in enumerate(creations): 
+        creaDislocs[i,:] = np.array([crea.idx, crea.idx + 1])
+    
+    overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
+    # Probably also possible without for-loop (but maybe not worth the time to come up with that)
+    nrRecollided = len(overlap)
+    
+    print(len(creations), " creations, ", 
+          len(creations) - nrRecollided, " survived. (i.e. ", 
+          100*(1-nrRecollided/len(creations)), "%)")
+    
+    
+    
+
 if showBackgr: 
-    plot1D(bInitial, trajectories, times, PK = PKlog)
+    plot1D(initialCharges, trajectories, times, PK = PKlog)
 else: 
-    plot1D(bInitial, trajectories, times, log = False)
+    plot1D(initialCharges, trajectories, times, log = False)
+
+printSummary()
