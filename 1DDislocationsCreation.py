@@ -288,8 +288,8 @@ class Creation:
     
     def createDipole(self):
         
-        if creaProc == 'lin': 
-            self.texc = 1/(2*np.abs(self.PKAtCrea))**2 #TODO Now preliminary fix by taking same texc as for zero-gamma
+        if creaProc == 'lin': #TODO this function should probably not have an asymptote! 
+            self.texc = 0.283465/(self.PKAtCrea-0.325376) + -0.013909/(self.PKAtCrea-0.325376)**2 + 0.000511/(self.PKAtCrea-0.325376)**3
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
