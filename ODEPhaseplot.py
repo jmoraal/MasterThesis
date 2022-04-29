@@ -11,6 +11,7 @@ from scipy.integrate import solve_ivp
 from scipy.stats import describe
 from scipy.optimize import fsolve
 from scipy.optimize import root
+from scipy.optimize import curve_fit
 
 
 #TODO definition of gamma depends on texc! Is this correctly adjusted? 
@@ -162,28 +163,26 @@ def initialCrit(Fmin, Fmax, N, tmin, tmax, M, plot = True):
 #%% One level deeper: for each texc, pick F s.t. Rcrit = 0. (bad computation time...)
 
 
-def FzeroSolver(tmin, tmax, M, method):
-    global texc
-    
-    ts = np.linspace(tmin, tmax, M)
+def FzeroSolver(ts, method):
+    M = len(ts)
     Fzeros = np.zeros(M)
     reachedSol = np.zeros(M, dtype = int)
     
     for j in range(M): 
         texc = ts[j]
         if method == 'fsolve': 
-            x, infodict, ier, msg = fsolve(critical, 0.5/texc, full_output = True, args = (texc,)) 
+            x, infodict, ier, msg = fsolve(critical, 1/texc, full_output = True, args = (texc,)) 
             Fzeros[j] = x
             # print(x, critical(x))
             
             reachedSol[j] = (ier == 1)
                 
         if method == 'root': 
-            sol = root(critical, 0.5/texc, method = 'broyden1', args = texc)
+            sol = root(critical, 1/texc, method = 'broyden1', args = texc)
             Fzeros[j] = sol.x
             reachedSol[j] = sol.success
             
-        print(f"Step {j} out of {M}")
+        print(f"Step {j} out of {M}, succesful: {reachedSol[j]}")
     
     #TODO may be possible to do this much faster by avoiding for-loop; requires adapting 'critical' to also take vector input (and output)
     
@@ -196,9 +195,28 @@ def FzeroSolver(tmin, tmax, M, method):
     plt.xlabel('$t_{exc}$')
     plt.ylabel('$F$')
     # plt.xlim([Fmin, Fmax])
+    
+    return tsProper, FzerosProper
 
 
 
+
+def modelFunc(x, a,b,c,d,e,k): 
+    
+    return a*x**2 + b*x + c + d/(x-k) + e/(x-k)**2
+ 
+
+
+def modelFunc2(x, d,e,k): 
+    
+    return d/(x-k) + e/(x-k)**2
+
+
+
+def modelFunc3(x, d,e,f,k): 
+    
+    return d/(x-k) + e/(x-k)**2 + f/(x-k)**3
+ 
 
 #%% Executables: 
 
@@ -215,10 +233,40 @@ def FzeroSolver(tmin, tmax, M, method):
 # initialCrit(Fmin, Fmax, N, tmin, tmax, M) # Critical R for varying F, several texc
 
 
-tmin = 0.2
+tmin = 0.01
 tmax = 0.6
-M = 100
+M = 1000
+ts = np.linspace(tmin, tmax, M) #evenly distributed
+# ts = np.flip(1/np.linspace(1/tmax,1/tmin,num = M)) # To lay more emphasis on small texc (where function varies faster)
 # method = 'root'  #very slow, but seems accurate
 method = 'fsolve' # fast but error-prone
-FzeroSolver(tmin, tmax, M, method) # Relate F and texc to critical R belonging to R(0) = 0
+tsProper, FzerosProper = FzeroSolver(ts, method) # Relate F and texc to critical R belonging to R(0) = 0
 
+
+## Fit solution to curve of given form: 
+
+t = np.array([0.37358491, 0.38322581, 0.39865772, 0.40965517,
+       0.41538462, 0.44      , 0.46046512, 0.48292683, 0.49090909,
+       0.53513514, 0.56571429])
+
+
+F = np.array([4.45941766, 3.37069126, 2.58838067, 2.26474695,
+       2.13757233, 1.74546846, 1.53373688, 1.36283032, 1.31201428,
+       1.09682232, 0.98939941])
+
+
+# params = curve_fit(modelFunc2, tsProper[tsProper<=0.5], FzerosProper[tsProper<=0.5])
+
+params, msg = curve_fit(modelFunc3, t, F, p0 = (1,1,1,0.3))
+
+print("Optimal parameters: ", params)
+a,b,c,d = params
+print(f"Optimal function: f(x) = {a:3f}/(x-{d:3f}) + {b:3f}/(x-{d:3f})**2 + {c:3f}/(x-{d:3f})**3")
+
+# Plot original and fitted function: 
+tSol = np.linspace(0.35, tmax, M)
+FSol = modelFunc3(tSol, a,b,c,d)
+
+plt.clf()
+plt.plot(t, F)
+plt.plot(tSol, FSol)
