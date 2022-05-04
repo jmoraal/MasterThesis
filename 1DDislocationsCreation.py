@@ -15,6 +15,7 @@ Created on Tue Dec 14 17:41:52 2021
 import numpy as np
 import matplotlib.pyplot as plt
 import time as timer
+from scipy.optimize import root
 
 ### Main todos
 #TODO Implement better integration scheme! Currently use forward Euler (originating from stochastic SDE approach) with improvised adaptive timestep
@@ -25,8 +26,9 @@ import time as timer
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 0.5           # Total simulation time
+simTime = 0.2           # Total simulation time
 dt = 0.001              # Timestep for discretisation (or maximum, if adaptive timestep)
+minTimestep = 1e-5      # Minimum size of timestep (for adaptive)
 adaptiveTime = True     # Whether to use adaptive timestep in integrator
 PBCs = False            # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'cutoff'          # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
@@ -35,12 +37,12 @@ cutoff = 200            # Regularisation parameter. Typically, force magnitude i
 randomness = False      # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01            # Standard dev. of noise (volatility)
 withAnnihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
-collTres = 1e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
+collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
-Fnuc = 10               # Threshold for magnitude of Peach-Koehler force 
-tnuc = 0.001            # Threshold for duration of PK force magnitude before creation
+Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
+tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
 drag = 1                # Multiplicative factor; only scales time I believe (and possibly external force)
 showBackgr = False      # Whether to plot PK force field behind trajectories
 domain = (0,1)          # Interval of space where initial dislocations and sources are placed (and possibly PBCs)
@@ -140,18 +142,18 @@ def setSources(M, background = showBackgr):
         backgrSrc = np.linspace(0,1, nrBackgrSrc)
 
 
-setExample(10)
+setExample(24)
 if withCreation: 
     setSources(12)
 
 
 # Additional comparison case (randomly generated but fixed): 
-initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
-       0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
-initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
-sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
-nrSources = len(sourceLocs)
-initialNrParticles = len(initialPositions)
+# initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
+#        0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
+# initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+# sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
+# nrSources = len(sourceLocs)
+# initialNrParticles = len(initialPositions)
 
 
 
@@ -257,7 +259,40 @@ def PeachKoehler(sourceLocs, x, b, stress, regularisation = 'eps'):
     f = np.sum(interactions, axis = 1) # Per source, sum contributions over all dislocs
     
     return f
- 
+
+    
+
+def texcToForce(t): 
+    params = [0.283465, -0.013909, 0.000511, 0.325376]
+    a,b,c,d = params
+    
+    return a/(t-d) + b/(t-d)**2 + c/(t-d)**3
+
+
+
+def poly3(x, a,b,c,d): 
+    return a * x**3 + b* x**2 + c * x + d
+
+
+def forceTotexcSlow(F):
+    params = [0.283465, -0.013909, 0.000511, 0.325376]
+    a,b,c,d = params
+    
+    sol = root(poly3, 1/F, args=(-F,a,b,c)) 
+    
+    return sol.x + d
+
+
+
+def forceTotexcFast(x): 
+    params = [0.283465, -0.013909, 0.000511, 0.325376]
+    a,b,c,d = params
+    
+    A = -2* a**3 - 9 *a* b* x - 27* c* x**2
+    B = -a**2 - 3* b* x
+    
+    
+    rt = (2**(1/3) * B)/(3 *x * (A + np.sqrt(A**2 + 4* B**3))**(1/3)) - (3 *x * (A + np.sqrt(A**2 + 4* B**3))**(1/3))/(3* 2**(1/3) *x) + (a + 3* d* x)/(3* x)
 
 
 class Source: 
@@ -289,7 +324,8 @@ class Creation:
     def createDipole(self):
         
         if creaProc == 'lin': #TODO this function should probably not have an asymptote! 
-            self.texc = 0.283465/(self.PKAtCrea-0.325376) + -0.013909/(self.PKAtCrea-0.325376)**2 + 0.000511/(self.PKAtCrea-0.325376)**3
+            self.texc = linearGammaTexc(self.PKAtCrea)
+            #TODO make separate function
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
@@ -431,7 +467,7 @@ while t < simTime:
     updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
     
     if adaptiveTime: 
-        dt = max(min(0.001/np.max(np.abs(updates)), dt),1e-10) # rudimentary adaptive timestep; always between (1e-10, dt)
+        dt = max(min(0.001/np.max(np.abs(updates)), dt),minTimestep) # rudimentary adaptive timestep; always between (minTimestep, dt)
         stepSizes.append(dt)
     
     x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
@@ -550,6 +586,6 @@ def printSummary():
 if showBackgr: 
     plot1D(initialCharges, trajectories, times, PK = PKlog)
 else: 
-    plot1D(initialCharges, trajectories, times, log = False)
+    plot1D(initialCharges, trajectories, times, log = True)
 
 printSummary()
