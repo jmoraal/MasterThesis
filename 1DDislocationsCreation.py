@@ -40,7 +40,7 @@ withAnnihilation = True # Whether dislocations disappear from system after colli
 collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
-creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
+creaProc = 'lin'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
 Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
 drag = 1                # Multiplicative factor; only scales time I believe (and possibly external force)
@@ -290,9 +290,11 @@ def forceTotexcFast(x):
     
     A = -2* a**3 - 9 *a* b* x - 27* c* x**2
     B = -a**2 - 3* b* x
+    C = (3 *x * (A + np.sqrt(A**2 + 4* B**3))**(1/3))
     
+    rt = (2**(1/3) * B)/C - C/(3* 2**(1/3) *x) + (a + 3* d* x)/(3* x)
     
-    rt = (2**(1/3) * B)/(3 *x * (A + np.sqrt(A**2 + 4* B**3))**(1/3)) - (3 *x * (A + np.sqrt(A**2 + 4* B**3))**(1/3))/(3* 2**(1/3) *x) + (a + 3* d* x)/(3* x)
+    return rt
 
 
 class Source: 
@@ -323,9 +325,9 @@ class Creation:
     
     def createDipole(self):
         
-        if creaProc == 'lin': #TODO this function should probably not have an asymptote! 
-            self.texc = linearGammaTexc(self.PKAtCrea)
-            #TODO make separate function
+        if creaProc == 'lin': 
+            self.texc = forceTotexcFast(self.PKAtCrea) # Choose fnct giving texc here
+            
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
         elif creaProc == 'zero': 
