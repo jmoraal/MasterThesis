@@ -26,7 +26,7 @@ from scipy.optimize import root
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 0.2           # Total simulation time
+simTime = 0.07           # Total simulation time
 dt = 0.001              # Timestep for discretisation (or maximum, if adaptive timestep)
 minTimestep = 1e-5      # Minimum size of timestep (for adaptive)
 adaptiveTime = True     # Whether to use adaptive timestep in integrator
@@ -40,7 +40,7 @@ withAnnihilation = True # Whether dislocations disappear from system after colli
 collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
 stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
-creaProc = 'lin'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
+creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
 Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
 drag = 1                # Multiplicative factor; only scales time I believe (and possibly external force)
@@ -90,6 +90,15 @@ def setExample(N):
         initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077, 0.28350536,
                                      0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
         initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+    
+    elif N == -2: # Additional comparison case (randomly generated but fixed): 
+        initialPositions = np.array([0.90041661, 0.09512205, 0.93625452, 0.67799578, 0.49170662,
+            0.1327828 , 0.17790777, 0.76411685, 0.97124885, 0.22572291,
+            0.4294073 , 0.87120555, 0.60016304, 0.97865076, 0.52582236,
+            0.64176168, 0.10342922, 0.26874082, 0.6207242 , 0.95723599])
+        initialCharges = np.array([-1.,  1.,  1.,  1., -1., -1., -1., 
+                                   -1., -1., -1.,  1., -1.,  1.,  1.,
+                                    1., -1., -1.,  1.,  1.,  1.])
     
     else: ### Given nr of particles, and option
         initialPositions = np.random.uniform(size = N) 
@@ -148,15 +157,18 @@ def setSources(M, background = showBackgr):
         backgrSrc = np.linspace(0,1, nrBackgrSrc)
 
 
-setExample(24)
+setExample(-2)
 if withCreation: 
-    setSources(24)
+    setSources(20)
 
 
 # Additional comparison case (randomly generated but fixed): 
-# initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
-#         0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
-# initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+# initialPositions = np.array([0.90041661, 0.09512205, 0.93625452, 0.67799578, 0.49170662,
+       # 0.1327828 , 0.17790777, 0.76411685, 0.97124885, 0.22572291,
+       # 0.4294073 , 0.87120555, 0.60016304, 0.97865076, 0.52582236,
+       # 0.64176168, 0.10342922, 0.26874082, 0.6207242 , 0.95723599])
+# initialCharges = np.array([-1.,  1.,  1.,  1., -1., -1., -1., -1., -1., -1.,  1., -1.,  1.,
+#        1.,  1., -1., -1.,  1.,  1.,  1.])
 # sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
 # nrSources = len(sourceLocs)
 # initialNrParticles = len(initialPositions)
@@ -294,11 +306,13 @@ def forceTotexcSlow(F):
 
 
 
-def forceTotexcFast(x): #TODO check correctness! How do we know the correct root is computed, if there are several?
+def forceTotexcFast(PK): #TODO check correctness! How do we know the correct root is computed, if there are several?
     """ Given force, computes corresponding exception time yielding equilibrium
         using explicit formula for root of a 3rd-degree polynomial. """
     params = [0.283465, -0.013909, 0.000511, 0.325376]
     a,b,c,d = params
+    
+    x = np.abs(PK)
     
     A = -2* a**3 - 9 *a* b* x - 27* c* x**2
     B = -a**2 - 3* b* x
@@ -339,6 +353,8 @@ class Source:
                 return True
         else: 
             self.tAboveThreshold = 0
+        
+        return False
         
 
 
@@ -584,7 +600,7 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
     nrPoints, nrTrajectories = np.shape(trajectories)
     
     y = t
-    plt.ylim((0,t[-1]))
+    plt.ylim((0,1.1*t[-1]))
     
     if log: # Plot with time on log-scale
         t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
@@ -654,3 +670,4 @@ else:
     plot1D(initialCharges, trajectories, times, log = False)
 
 printSummary()
+plt.ylim((0,0.04))
