@@ -50,7 +50,7 @@ domain = (0,1)          # Interval of space where initial dislocations and sourc
 
 
 def setExample(N): 
-    '''
+    """
     Initialises positions and charges of given nr of dislocations
 
     Parameters
@@ -63,7 +63,7 @@ def setExample(N):
     -------
     None (sets global variables).
 
-    '''
+    """
     global initialPositions, initialCharges, initialNrParticles
     
     if N == 0: ### Empty example; requires some adaptions in code below (e.g. turn off 'no dislocations left' break)
@@ -85,7 +85,12 @@ def setExample(N):
         initialPositions = np.array([0.02, 0.2, 0.8, 0.85, 1]) 
         initialCharges = np.array([-1, -1, 1, 1, -1]) # Particle charges
     
-        
+    
+    elif N == -1: # Additional comparison case (randomly generated but fixed): 
+        initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077, 0.28350536,
+                                     0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
+        initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
+    
     else: ### Given nr of particles, and option
         initialPositions = np.random.uniform(size = N) 
         initialCharges = np.ones(N)
@@ -101,7 +106,7 @@ def setExample(N):
         
 
 def setSources(M, background = showBackgr): 
-    '''
+    """
     Initialises positions and charges of given nr of sources
 
     Parameters
@@ -118,12 +123,13 @@ def setSources(M, background = showBackgr):
     -------
     None (sets global variables).
 
-    '''
+    """
     global nrSources, sourceLocs, nrBackgrSrc, backgrSrc
     # Initialise sourceLocs for creation: 
     
     if M == -1: 
-        sourceLocs = np.array([0.21, 0.3, 0.45, 0.75, 0.8])
+        # sourceLocs = np.array([0.21, 0.3, 0.45, 0.75, 0.8]) # Irregularly spaced sources
+        sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
     
     elif M == 1: 
         sourceLocs = np.array([0.55])
@@ -144,12 +150,12 @@ def setSources(M, background = showBackgr):
 
 setExample(24)
 if withCreation: 
-    setSources(12)
+    setSources(24)
 
 
 # Additional comparison case (randomly generated but fixed): 
 # initialPositions = np.array([0.00727305, 0.04039581, 0.25157344, 0.2757077 , 0.28350536,
-#        0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
+#         0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
 # initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
 # sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
 # nrSources = len(sourceLocs)
@@ -184,7 +190,7 @@ def pairwiseDistance(x1, PBCs = False, x2 = None):
 
 
 def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
-    '''
+    """
     Compute array of pairwise particle interactions for given array of particle coordinates and charges 
 
     Parameters
@@ -205,7 +211,7 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
     interactions : 2D numpy array (nxn)
         representing force pairs of particles exert on each other.
 
-    '''
+    """
     
     np.fill_diagonal(dist, 1) # Set distance from particle to itself to (arbitrary) non-zero value to avoid div by 0; arbitrary, since this term cancels out anyway
     chargeArray = b * b[:,np.newaxis] # Create matrix (b_i b_j)_ij
@@ -231,7 +237,7 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
 
 
 def projectParticles(x):
-    """Projects particles into box of given size."""
+    """Projects particles into box of given size. (For periodic boundaries)"""
     
     x[np.isfinite(x)] %= 1 # Also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
     # Index by isfinite to not affect np.nan (still works otherwise, but gives warning)
@@ -263,6 +269,7 @@ def PeachKoehler(sourceLocs, x, b, stress, regularisation = 'eps'):
     
 
 def texcToForce(t): 
+    """ Given force exception time, computes corresponding force yielding equilibrium"""
     params = [0.283465, -0.013909, 0.000511, 0.325376]
     a,b,c,d = params
     
@@ -271,10 +278,13 @@ def texcToForce(t):
 
 
 def poly3(x, a,b,c,d): 
+    """ Computes third-degree polynomial in x with coefficients a,b,c,d """
     return a * x**3 + b* x**2 + c * x + d
 
 
 def forceTotexcSlow(F):
+    """ Given force, computes corresponding exception time yielding equilibrium
+        using root-finding algorithm. """
     params = [0.283465, -0.013909, 0.000511, 0.325376]
     a,b,c,d = params
     
@@ -284,7 +294,9 @@ def forceTotexcSlow(F):
 
 
 
-def forceTotexcFast(x): 
+def forceTotexcFast(x): #TODO check correctness! How do we know the correct root is computed, if there are several?
+    """ Given force, computes corresponding exception time yielding equilibrium
+        using explicit formula for root of a 3rd-degree polynomial. """
     params = [0.283465, -0.013909, 0.000511, 0.325376]
     a,b,c,d = params
     
@@ -298,12 +310,28 @@ def forceTotexcFast(x):
 
 
 class Source: 
+    """ Represents a creation source and tracks creation thresholds.  
+    
+    Attributes: 
+        pos: float, 
+            position of source
+        tAboveThreshold: float (positive) 
+            tracks how long threshold is reached
+        
+    Methods: 
+        updateThresTime: updates threshold time depending on 
+                         whether force threshold is reached
+    """
+    
     def __init__(self, loc):
-        self.pos = loc
+        """ Initialises source at position loc and time 0 (via Source(loc)) """
+        
+        self.loc = loc
         self.tAboveThreshold = 0
     
         
-    def updateThresTime(self, PK, dt, N):
+    def updateThresTime(self, PK, dt):
+        """Given force and timestep, either increments threshold or sets to 0 """
         if (np.abs(PK) > Fnuc): 
             self.tAboveThreshold += dt
             if self.tAboveThreshold >= tnuc: 
@@ -315,7 +343,25 @@ class Source:
 
 
 class Creation: 
+    """ Single creation event (and exception time in case of gamma-creation) 
+    
+    Attributes: 
+        loc: float
+            location at which creation occurred
+        PKAtCrea: float
+            Peach-Koehler force at creation moment and location
+        creaTime: float (positive)
+            time at which creation occurred
+        idx: integer
+            index in position array of first created dislocation (from pair)
+        inProgress: boolean
+            indicating whether creation process is still in progress, 
+            i.e. whether force exception should still hold
+        """
+    
     def __init__(self, loc, PK, t, idx):
+        """ Initialisation of creation event at given parameters"""
+        
         self.loc = loc
         self.PKAtCrea = PK
         self.creaTime = t
@@ -324,6 +370,8 @@ class Creation:
             
     
     def createDipole(self):
+        """ Creation of dislocations and definition of creation parameters
+            according to set creation procedure. """
         
         if creaProc == 'lin': 
             self.texc = forceTotexcFast(self.PKAtCrea) # Choose fnct giving texc here
@@ -344,6 +392,9 @@ class Creation:
     
     
     def forceAdjustment(self, t):
+        """ Compute factor with which interaction between created pair is 
+            multiplied to adjust forces """
+        
         if creaProc == 'lin': 
             forceFact = (2*(t - self.creaTime)/self.texc - 1)
         
@@ -354,6 +405,7 @@ class Creation:
     
     
     def exceptionCheck(self, t): 
+        """ Check whether exception still applies to created pair """
         
         if (creaProc == 'lin') or (creaProc == 'zero'): 
             if t > self.creaTime + self.texc: 
@@ -363,6 +415,17 @@ class Creation:
 
 
 class Annihilation: 
+    """ Describes annihilation event 
+    
+    Attributes: 
+        annTime: float (positive)
+            time at which annihilation event occurred
+        dislocs: tuple of integers
+            indices of dislocations involved in annihilation/collision
+    """ 
+    # Note: currently, this does not need to be a class. However, extensions
+    #       with greater functionality may be desirable
+    
     def __init__(self, annTime, dislocs):
         self.annTime = annTime
         self.dislocs = dislocs
@@ -405,9 +468,9 @@ while t < simTime:
         charges = []
         
         for i,src in enumerate(sources): 
-            thresReached = src.updateThresTime(PK[i], dt, len(x)) # Sources updated, boolean indicates whether threshold is reached
+            thresReached = src.updateThresTime(PK[i], dt) # Sources updated, boolean indicates whether threshold is reached
             if thresReached: # If threshold is reached, initiate creation procedure: 
-                newCrea = Creation(src.pos, PK[i], t, len(x) + 2*len(creations)) # Initialise Creation
+                newCrea = Creation(src.loc, PK[i], t, len(x) + 2*len(creations)) # Initialise Creation
                 creations.append(newCrea) # Append to  list of all creations
                 currentCreations.append(newCrea) # Append to  list of current creations
                 locs, charges = Creation.createDipole(newCrea) # Obtain corresponding dipole locations and charges
@@ -563,24 +626,24 @@ def printSummary():
     else: 
         print("Total annihilation time: not reached")
     
-    
-    # See how many created dipoles recollided: 
-    annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work if three or more dislocs annihilate! 
-    creaDislocs = np.zeros((len(creations),2))
-    nrRecollided = 0
-    for i,ann in enumerate(annihilations): 
-        annDislocs[i,:] = np.sort(ann.dislocs) #sort on lower index first to ease comparison below
-    
-    for i,crea in enumerate(creations): 
-        creaDislocs[i,:] = np.array([crea.idx, crea.idx + 1])
-    
-    overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
-    # Probably also possible without for-loop (but maybe not worth the time to come up with that)
-    nrRecollided = len(overlap)
-    
-    print(len(creations), " creations, ", 
-          len(creations) - nrRecollided, " survived. (i.e. ", 
-          100*(1-nrRecollided/len(creations)), "%)")
+    if len(creations) > 0: 
+        # See how many created dipoles recollided: 
+        annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work if three or more dislocs annihilate! 
+        creaDislocs = np.zeros((len(creations),2))
+        nrRecollided = 0
+        for i,ann in enumerate(annihilations): 
+            annDislocs[i,:] = np.sort(ann.dislocs) #sort on lower index first to ease comparison below
+        
+        for i,crea in enumerate(creations): 
+            creaDislocs[i,:] = np.array([crea.idx, crea.idx + 1])
+        
+        overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
+        # Probably also possible without for-loop (but maybe not worth the time to come up with that)
+        nrRecollided = len(overlap)
+        
+        print(len(creations), " creations, ", 
+              len(creations) - nrRecollided, " survived. (i.e. ", 
+              100*(1-nrRecollided/len(creations)), "%)")
     
     
     
@@ -588,6 +651,6 @@ def printSummary():
 if showBackgr: 
     plot1D(initialCharges, trajectories, times, PK = PKlog)
 else: 
-    plot1D(initialCharges, trajectories, times, log = True)
+    plot1D(initialCharges, trajectories, times, log = False)
 
 printSummary()
