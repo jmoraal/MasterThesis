@@ -28,16 +28,16 @@ from scipy.optimize import root
 ### Simulation settings
 simTime = 0.07           # Total simulation time
 dt = 0.001              # Timestep for discretisation (or maximum, if adaptive timestep)
-minTimestep = 1e-5      # Minimum size of timestep (for adaptive)
+minTimestep = 1e-6      # Minimum size of timestep (for adaptive)
 adaptiveTime = True     # Whether to use adaptive timestep in integrator
 PBCs = False            # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'cutoff'          # Regularisation technique; for now either 'eps', 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
+reg = 'cutoff'          # Regularisation technique; for now either 'eps' (V2 in vMeurs15), 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
 eps = 0.01              # Regularisation parameter
 cutoff = 200            # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
 randomness = False      # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01            # Standard dev. of noise (volatility)
 withAnnihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
-collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be Should be very close to 0 if regularisation is used
+collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be very close to 0 if regularisation is used
 stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
 withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
@@ -231,7 +231,7 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
     if regularisation == 'eps': 
         distCorrected = (dist**2 + eps**2) # Normalise to avoid computational problems at singularity. Square to normalise difference vector
     else: 
-        distCorrected = dist**2 # Normalise to avoid computational problems at singularity. Square to normalise difference vector
+        distCorrected = dist**2 # Square to normalise difference vector
         
         # interactions = -(1/diff) * chargeArray # Only in 1D; else need diff/dist
     
@@ -454,6 +454,8 @@ class Annihilation:
 t = 0
 stepSizes = []
 times = [0]
+maxUpdate = 0 # To store for computing adaptive timestep
+maxTimestep = dt
 
 trajectories = initialPositions[None,:] # Change shape into (1,len)
 x = np.copy(initialPositions) # 'copy' to create new array; otherwise, x is just a reference (and changes if initialPositions changes)
@@ -509,23 +511,35 @@ while t < simTime:
     diff, dist = pairwiseDistance(x, PBCs = PBCs)
     
     
-    if withAnnihilation: # Make dislocs annihilate when necessary (before computing interactions, s.t. annihilated dislocs indeed do not influence the system anymore)
+    if withAnnihilation: # Make dislocs annihilate when necessary 
+                         #(before computing interactions, s.t. annihilated 
+                         # dislocs indeed do not influence the system anymore)
         tempDist = np.nan_to_num(dist, nan = 1000) + 1000*np.tril(np.ones((len(x),len(x)))) 
         # Set nans and non-above-diagonal entries to arbitrary large number,  
         # so that effectively all entries on and below diagonal are disregarded in comparison below
         
-        collPart1, collPart2 = np.where((tempDist < collTres)) # Identifies pairs closer than collTres together. Format: ([parts A], [parts B]).
-        # First fix: combine all overlapping pairs into dislocations. But note that this can let dislocations annihilate from arbitrarily far away...
+        chargeArray = b * b[:,np.newaxis] # Create matrix (b_i b_j)_ij
+        collPart1, collPart2 = np.where((tempDist < collTres) * (chargeArray == -1)) 
+        # Identifies pairs with opposite charge closer than collTres together 
+        #('*' works as and-operator for 0/1 booleans). Format: ([parts A], [parts B]).
+        
+        # First fix: combine all overlapping pairs into dislocations. But note
+        # that this can let dislocations annihilate from arbitrarily far away...
         # Note: looking at above-diagonal entries, all pairs are ordered w/ smallest index first. 
         # But problem: it actually depends on which index you take first which ones annihilate...
         
-        for i in np.unique(collPart1): # Iterate over all particles involved in annihilation (1st in pair)
-            dislocGroup = collPart2[collPart1 == i] #Find all other particles i is close enough to
-            if len(dislocGroup) % 2 == 1:  #If even number of dislocs annihilate (so nr dislocs i annihilates with is odd), all end up with charge 0
+        # Iterate over all particles involved in annihilation (1st in pair):
+        for i in np.unique(collPart1): 
+            dislocGroup = collPart2[collPart1 == i] #Find all others i is close to
+            if len(dislocGroup) % 2 == 1:  
+                # If even number of dislocs annihilate (so nr dislocs i 
+                # annihilates with is odd), all end up with charge 0
                 b[i] = 0
                 x[i] = np.nan
-            else: # In other cases, one disloc ends up with remaining charge and set to average position of annihilating dislocs.
-                b[i] = np.sum(b[dislocGroup]) + b[i] #give i remaining charge (i is arbitrary choice; does not matter for solution)
+            else: # In other cases, one disloc ends up with remaining charge 
+                  # and set to average position of annihilating dislocs.
+                b[i] = np.sum(b[dislocGroup]) + b[i] #give i remaining charge 
+                # (i is arbitrary choice; does not matter for solution)
                 x[i] = np.average(np.append(x[dislocGroup], x[i]))
             
             b[dislocGroup] = 0 #Set charges of all others to 0
@@ -537,21 +551,32 @@ while t < simTime:
     interactions = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
     
         
-    # Adjust forces between newly created dislocations (keeping track of time since each creation separately)
+    # Adjust forces between newly created dislocations 
+    # (keeping track of time since each creation separately)
     if withCreation: 
-        for crea in currentCreations: # 'creations' now only contains pairs with force exception
+        for crea in currentCreations: # only contains pairs with force exception
             j = crea.idx
             interactions[j : j + 2, j : j + 2] *= crea.forceAdjustment(t)
         
     
     ## Main update step: 
-    updates = np.nansum(interactions,axis = 1)  # Deterministic part; treating NaNs as zero
+    updates = np.nansum(interactions,axis = 1)  # Treats NaNs as zero
     
-    if adaptiveTime: 
-        dt = max(min(0.001/np.max(np.abs(updates)), dt),minTimestep) # rudimentary adaptive timestep; always between (minTimestep, dt)
+    
+    if adaptiveTime: # rudimentary adaptive timestep; always between (minTimestep, dt)
+        # dt = np.clip(0.001/np.max(np.abs(updates)), minTimestep, maxTimestep)
+        
+        # better (hopefully): also always between (minTimestep, dt)
+        newMaxUpdate = np.max(np.abs(updates)) # For computing adaptive timestep
+        approxD2 = (newMaxUpdate - maxUpdate)/dt # Estimate 2nd derivative
+        dt = np.clip(1/approxD2, minTimestep, maxTimestep) 
         stepSizes.append(dt)
+        maxUpdate = newMaxUpdate # Interchange to store for next iteration
+        
+        
     
-    x_new = x + drag * updates * dt # Alternative file available with built-in ODE-solver, but without creation
+    x_new = x + drag * updates * dt 
+    # (Alternative file available with built-in ODE-solver, without creation)
     
     if randomness: 
         random = sigma * np.random.normal(size = len(x)) # Random part of update
@@ -561,7 +586,8 @@ while t < simTime:
     if PBCs: 
         x_new = projectParticles(x_new) # Places particles back into box
     
-    trajectories = np.append(trajectories, x_new[None,:], axis = 0) # Store all positions for visualisation
+    # Store all positions for visualisation: 
+    trajectories = np.append(trajectories, x_new[None,:], axis = 0) 
     
     
     x = x_new
@@ -603,7 +629,8 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
     plt.ylim((0,1.1*t[-1]))
     
     if log: # Plot with time on log-scale
-        t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
+        t[0] = t[1]/2 # So that first timestep is clearly visible in plot. 
+                      # Not quite truthful, but also not quite wrong. 
         plt.yscale('log')
         plt.ylim((t[0],t[-1])) 
     
@@ -612,25 +639,25 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
         x_current = trajectories[:,i]
         y_current = y
         if PBCs: #insert NaNs at 'discontinuities':
-            x_temp = np.nan_to_num(x_current, nan = 10**5) # Work-around to avoid invalid values in np.where below
+            x_temp = np.nan_to_num(x_current, nan = 10**5) # avoids error in np.where below
             pos = np.where(np.abs(np.diff(x_temp)) >= 0.5)[0]+1 # find jumps across domain caused by PBCs
             x_current = np.insert(x_current, pos, np.nan) # Insert NaNs in order not to draw jumps
             y_current = np.insert(y, pos, np.nan) 
             # Note that x[pos] = np.nan would work as well, but that would delete data
         
         plt.plot(x_current, y_current, c = colorDict.get(bInitial[i]))
-        # Set colour of created dislocations according to charge they eventually get (not 0, which they begin with)
+        # Set colour of created dislocations according to charge they 
+        # eventually get (not 0, which they begin with)
         
     if not PK is None:
         # Broadcast timesteps and locations of sources into same size arrays:
         timeCoord = y[:,np.newaxis] * np.ones(len(PK[0]))
         locCoord = backgrSrc * np.ones(len(PK))[:,np.newaxis]
         
-        if showBackgr: 
-            PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) # Scale to get better colourplot
+        if showBackgr: # Scale to get better colourplot: 
+            PKnew = np.log(np.abs(PK) + 0.01) / np.log(np.max(np.abs(PK))) 
             
             plt.scatter(locCoord, timeCoord, s=50, c=PKnew, cmap='Greys')
-        #May be able to use this? https://stackoverflow.com/questions/10817669/subplot-background-gradient-color/10821713
 
 
 
@@ -644,7 +671,7 @@ def printSummary():
     
     if len(creations) > 0: 
         # See how many created dipoles recollided: 
-        annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work if three or more dislocs annihilate! 
+        annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work for >= three or more dislocs annihilate! 
         creaDislocs = np.zeros((len(creations),2))
         nrRecollided = 0
         for i,ann in enumerate(annihilations): 
@@ -656,11 +683,13 @@ def printSummary():
         overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
         # Probably also possible without for-loop (but maybe not worth the time to come up with that)
         nrRecollided = len(overlap)
+        fracSurvived = 1-nrRecollided/len(creations)
         
         print(len(creations), " creations, ", 
               len(creations) - nrRecollided, " survived. (i.e. ", 
-              100*(1-nrRecollided/len(creations)), "%)")
+              100*fracSurvived, "%)")
     
+    return len(annihilations), len(creations), nrRecollided, fracSurvived
     
     
 
@@ -670,4 +699,3 @@ else:
     plot1D(initialCharges, trajectories, times, log = False)
 
 printSummary()
-plt.ylim((0,0.04))
