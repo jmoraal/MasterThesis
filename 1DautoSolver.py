@@ -12,13 +12,13 @@ from scipy.integrate import solve_ivp
 
 
 # %% Simulation settings
-simTime = 1.5         # Total simulation time
+simTime = 0.1         # Total simulation time
 PBCs = False         # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
-reg = 'eps'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
+reg = 'none'         # Regularisation technique; for now either 'eps' or 'cutoff' #TODO implement better regularisation, e.g. from Michiels20
 eps = 0.01        # To avoid singular force making computation instable. 
-boxLength = 5
-annihilation = False
-collTres = 0.001
+boxLength = 1
+annihilation = True
+collTres = 1e-4
 
 #TODO If we use collision threshold, do we even need regularisation?
 
@@ -60,7 +60,7 @@ def setExample(N, boxLen = 1):
     domain = (0,boxLength)
 
 
-setExample(0, boxLen = boxLength)
+setExample(50, boxLen = boxLength)
 
 # To plot: 
 bInitial = np.copy(b)
@@ -132,19 +132,21 @@ def f(t,x, regularisation = 'eps', PBCs = False):
     updates = np.nansum(interactions,axis = 1) 
     
     if annihilation: 
-        annIdx = np.where((dist < collTres) * (chargeArray == -1))[0] # * works as 'and'-operator for boolean (1/0) arrays
-        #so that only close and opposite-charged particles annihilate. 
+        collPart1, collPart2 = np.where((dist < collTres) * (chargeArray == -1)) 
+        # Identifies pairs with opposite charge closer than collTres together 
+        #('*' works as and-operator for 0/1 booleans). Format: ([parts A], [parts B]).
         
-        #Now if n particles collide, at least n-1 annihilate; the other (arbitrary) gets remaining charge.
-        b[annIdx[1:]] = 0 
-        b[annIdx[0]] = np.sum(b[annIdx]) #Should always be 0, -1 or 1!
-        #TODO does not properly cover the case where e.g. three dislocations are close; then now, all annihilate (wrongly)
-        annTimes[annIdx] = t #save for plotting
+        bOld = np.copy(b) #to compare below, seeing whether annihilation happened this timestep
         
-        # bOld = np.copy(b) #to compare below, seeing whether annihilation happened this timestep
-        # b[np.where((dist < collTres) * (chargeArray == -1))[0]] = 0 #so that only close and opposite-charged particles annihilate. * works as 'and'-operator for boolean (1/0) arrays
-        # #TODO does not properly cover the case where e.g. three dislocations are close; then now, all annihilate (wrongly)
-        # annTimes[bOld != b] = t #save for plotting
+        # Go through list sequentially, annihilating not-yet-annihilated dislocs. 
+        for i in range(len(collPart1)): 
+            i1 = collPart1[i]
+            i2 = collPart2[i]
+            if b[i1] != 0 and b[i2] != 0 and i1 != i2: 
+                b[i1] = 0
+                b[i2] = 0
+        
+        annTimes[bOld != b] = t #save for plotting
         
         
     return updates
@@ -167,7 +169,7 @@ def projectParticles(x):
 simStartTime = timer.time() # To measure simulation computation time
 
 ### Simulation loop
-sol = solve_ivp(f, [0, simTime], initialPositions, method = 'BDF', max_step = 0.1) #BDF is best for problems that may be stiff
+sol = solve_ivp(f, [0, simTime], initialPositions, method = 'BDF', max_step = 0.01) #BDF is best for problems that may be stiff
 
 
 duration = timer.time() - simStartTime
@@ -182,7 +184,7 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
     ''' Given a solution from solve_ivp, plots trajectories according to given charges. 
     Optional: 
      - plot on log-scale if log = True
-     - stop plotting if dislocations annihilated    
+     - stop plotting if all dislocations annihilated    
     '''
     
     plt.clf()
@@ -192,7 +194,7 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
     colorDict = {1:'red', 0:'grey', -1:'blue'}
     nrParticles = len(x[0])
     plt.ylim((0,t[-1]))
-    plt.xlim((np.min(x),np.max(x)))
+    plt.xlim((np.min(x[np.isfinite(x)]),np.max(x[np.isfinite(x)])))
     if log: 
         t[0] = t[1]/2 #So that first timestep is clearly visible in plot. Not quite truthful, but also not quite wrong. 
         plt.yscale('log')
@@ -203,7 +205,7 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
         if annihilationTimes is None: 
             t_current = t
             x_current = x[:,i]
-        else: 
+        else: # Only plot trajectories up to annihilation
             t_current = t[t < annTimes[i]]
             x_current = x[:len(t_current),i]
         
