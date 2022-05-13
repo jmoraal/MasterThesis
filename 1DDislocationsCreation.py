@@ -26,20 +26,19 @@ from scipy.optimize import root
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 0.07           # Total simulation time
+simTime = 0.12         # Total simulation time
 dt = 0.001              # Timestep for discretisation (or maximum, if adaptive timestep)
-minTimestep = 1e-6      # Minimum size of timestep (for adaptive)
+minTimestep = 1e-7      # Minimum size of timestep (for adaptive)
 adaptiveTime = True     # Whether to use adaptive timestep in integrator
 PBCs = False            # Whether to work with Periodic Boundary Conditions (i.e. see domain as torus)
 reg = 'cutoff'          # Regularisation technique; for now either 'eps' (V2 in vMeurs15), 'V1' (after vMeurs15), 'cutoff' or 'none' (only works when collTres > 0)
-eps = 0.01              # Regularisation parameter
-cutoff = 200            # Regularisation parameter. Typically, force magnitude is 50 just before annihilation with eps=0.01
+eps = 0.01              # Regularisation parameter (for all three methods)
 randomness = False      # Whether to add random noise to dislocation positions (normal distr.)
 sigma = 0.01            # Standard dev. of noise (volatility)
 withAnnihilation = True # Whether dislocations disappear from system after collision (under annihilation rules)
 collTres = 3e-3         # Collision threshold; if particles are closer than this, they are considered collided. Should be very close to 0 if regularisation is used
 stress = 0              # External force (also called 'F'); only a constant in 1D case. Needed for creation in empty system
-withCreation = True     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
+withCreation = False     # Whether dipoles are introduced automatically according to creation rule (as opposed to explicit time and place specification)
 creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' (for linear gamma, zero-gamma or distance creation respectively)
 Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
@@ -157,21 +156,21 @@ def setSources(M, background = showBackgr):
         backgrSrc = np.linspace(0,1, nrBackgrSrc)
 
 
-setExample(-2)
+setExample(20)
 if withCreation: 
     setSources(20)
 
 
 # Additional comparison case (randomly generated but fixed): 
-# initialPositions = np.array([0.90041661, 0.09512205, 0.93625452, 0.67799578, 0.49170662,
-       # 0.1327828 , 0.17790777, 0.76411685, 0.97124885, 0.22572291,
-       # 0.4294073 , 0.87120555, 0.60016304, 0.97865076, 0.52582236,
-       # 0.64176168, 0.10342922, 0.26874082, 0.6207242 , 0.95723599])
-# initialCharges = np.array([-1.,  1.,  1.,  1., -1., -1., -1., -1., -1., -1.,  1., -1.,  1.,
-#        1.,  1., -1., -1.,  1.,  1.,  1.])
-# sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
-# nrSources = len(sourceLocs)
-# initialNrParticles = len(initialPositions)
+initialPositions = np.array([0.90041661, 0.09512205, 0.93625452, 0.67799578, 0.49170662,
+        0.1327828 , 0.17790777, 0.76411685, 0.97124885, 0.22572291,
+        0.4294073 , 0.87120555, 0.60016304, 0.97865076, 0.52582236,
+        0.64176168, 0.10342922, 0.26874082, 0.6207242 , 0.95723599])
+initialCharges = np.array([-1.,  1.,  1.,  1., -1., -1., -1., -1., -1., -1.,  1., -1.,  1.,
+        1.,  1., -1., -1.,  1.,  1.,  1.])
+sourceLocs = np.array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ])
+nrSources = len(sourceLocs)
+initialNrParticles = len(initialPositions)
 
 
 
@@ -242,7 +241,7 @@ def interaction(diff,dist,b, PBCBool = False, regularisation = 'eps'):
         interactions[dist < eps] = diff/eps**2
     
     if regularisation == 'cutoff': 
-        interactions = np.clip(interactions, -cutoff, cutoff) # Sets all values outside [-c,c] to value of closest boundary
+        interactions = np.clip(interactions, -1/eps, 1/eps) # Sets all values outside [-c,c] to value of closest boundary
     
     return interactions
 
@@ -398,8 +397,8 @@ class Creation:
             self.texc = 1/(2*np.abs(self.PKAtCrea))**2
             locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
         
-        elif creaProc == 'nuc':
-            self.Lnuc = 1/(2* np.abs(self.PKAtCrea))
+        elif creaProc == 'dist':
+            self.Lnuc = 1/(np.abs(self.PKAtCrea))
             locs = np.array([self.loc - 0.5*self.Lnuc, self.loc + 0.5*self.Lnuc])
         
         charges = np.array([1,-1])*np.sign(self.PKAtCrea)
@@ -426,7 +425,7 @@ class Creation:
         if (creaProc == 'lin') or (creaProc == 'zero'): 
             if t > self.creaTime + self.texc: 
                 self.inProgress = False 
-        elif creaProc == 'nuc':
+        elif creaProc == 'dist':
             self.inProgress = False
 
 
@@ -523,29 +522,16 @@ while t < simTime:
         # Identifies pairs with opposite charge closer than collTres together 
         #('*' works as and-operator for 0/1 booleans). Format: ([parts A], [parts B]).
         
-        # First fix: combine all overlapping pairs into dislocations. But note
-        # that this can let dislocations annihilate from arbitrarily far away...
-        # Note: looking at above-diagonal entries, all pairs are ordered w/ smallest index first. 
-        # But problem: it actually depends on which index you take first which ones annihilate...
-        
-        # Iterate over all particles involved in annihilation (1st in pair):
-        for i in np.unique(collPart1): 
-            dislocGroup = collPart2[collPart1 == i] #Find all others i is close to
-            if len(dislocGroup) % 2 == 1:  
-                # If even number of dislocs annihilate (so nr dislocs i 
-                # annihilates with is odd), all end up with charge 0
-                b[i] = 0
-                x[i] = np.nan
-            else: # In other cases, one disloc ends up with remaining charge 
-                  # and set to average position of annihilating dislocs.
-                b[i] = np.sum(b[dislocGroup]) + b[i] #give i remaining charge 
-                # (i is arbitrary choice; does not matter for solution)
-                x[i] = np.average(np.append(x[dislocGroup], x[i]))
             
-            b[dislocGroup] = 0 #Set charges of all others to 0
-            x[dislocGroup] = np.nan #Remove from system
-            
-            annihilations.append(Annihilation(t, np.append(dislocGroup,i)))
+        # Go through list sequentially, annihilating not-yet-annihilated dislocs. 
+        for i in range(len(collPart1)): 
+            i1 = collPart1[i]
+            i2 = collPart2[i]
+            if b[i1] != 0 and b[i2] != 0: 
+                b[i1] = 0
+                b[i2] = 0
+                x[i1] = np.nan
+                x[i2] = np.nan
     
     
     interactions = interaction(diff,dist,b, PBCBool = PBCs, regularisation = reg)
@@ -564,14 +550,14 @@ while t < simTime:
     
     
     if adaptiveTime: # rudimentary adaptive timestep; always between (minTimestep, dt)
-        # dt = np.clip(0.001/np.max(np.abs(updates)), minTimestep, maxTimestep)
+        dt = np.clip(0.001/np.max(np.abs(updates)), minTimestep, maxTimestep)
         
         # better (hopefully): also always between (minTimestep, dt)
-        newMaxUpdate = np.max(np.abs(updates)) # For computing adaptive timestep
-        approxD2 = (newMaxUpdate - maxUpdate)/dt # Estimate 2nd derivative
-        dt = np.clip(1/approxD2, minTimestep, maxTimestep) 
-        stepSizes.append(dt)
-        maxUpdate = newMaxUpdate # Interchange to store for next iteration
+        # newMaxUpdate = np.max(np.abs(updates)) # For computing adaptive timestep
+        # approxD2 = (newMaxUpdate - maxUpdate)/dt # Estimate 2nd derivative
+        # dt = np.clip(1/approxD2, minTimestep, maxTimestep) 
+        # stepSizes.append(dt)
+        # maxUpdate = newMaxUpdate # Interchange to store for next iteration
         
         
     
@@ -663,39 +649,46 @@ def plot1D(bInitial, trajectories, t, PK = None, log = False):
 
 def printSummary(): 
     global nrRecollided, annDislocs, creaDislocs, overlap
-    print("Total nr of Creations: ", len(creations))
+    if withCreation: 
+        print("Total nr of Creations: ", len(creations))
+    print("Total nr of Annihilations: ", len(annihilations))
     if t < simTime: 
         print("Total annihilation time: ", t)
     else: 
         print("Total annihilation time: not reached")
     
-    if len(creations) > 0: 
-        # See how many created dipoles recollided: 
-        annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work for >= three or more dislocs annihilate! 
-        creaDislocs = np.zeros((len(creations),2))
-        nrRecollided = 0
-        for i,ann in enumerate(annihilations): 
-            annDislocs[i,:] = np.sort(ann.dislocs) #sort on lower index first to ease comparison below
-        
-        for i,crea in enumerate(creations): 
-            creaDislocs[i,:] = np.array([crea.idx, crea.idx + 1])
-        
-        overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
-        # Probably also possible without for-loop (but maybe not worth the time to come up with that)
-        nrRecollided = len(overlap)
-        fracSurvived = 1-nrRecollided/len(creations)
-        
-        print(len(creations), " creations, ", 
-              len(creations) - nrRecollided, " survived. (i.e. ", 
-              100*fracSurvived, "%)")
+    if withCreation: 
+        if len(creations) > 0: 
+            # See how many created dipoles recollided: 
+            annDislocs = np.zeros((len(annihilations),2)) #NOTE: may not work for >= three or more dislocs annihilate! 
+            creaDislocs = np.zeros((len(creations),2))
+            nrRecollided = 0
+            for i,ann in enumerate(annihilations): 
+                annDislocs[i,:] = np.sort(ann.dislocs) #sort on lower index first to ease comparison below
+            
+            for i,crea in enumerate(creations): 
+                creaDislocs[i,:] = np.array([crea.idx, crea.idx + 1])
+            
+            overlap = [pair for pair in creaDislocs if pair in annDislocs] # Create list of pairs that were created, but also annihilated
+            # Probably also possible without for-loop (but maybe not worth the time to come up with that)
+            nrRecollided = len(overlap)
+            fracSurvived = 1-nrRecollided/len(creations)
+            
+            print(len(creations), " creations, ", 
+                  len(creations) - nrRecollided, " survived. (i.e. ", 
+                  100*fracSurvived, "%)")
     
-    return len(annihilations), len(creations), nrRecollided, fracSurvived
+    if withCreation: 
+        return len(annihilations), len(creations), nrRecollided, fracSurvived
+    else: 
+        return len(annihilations)
     
-    
+
 
 if showBackgr: 
     plot1D(initialCharges, trajectories, times, PK = PKlog)
 else: 
     plot1D(initialCharges, trajectories, times, log = False)
 
+    
 printSummary()
