@@ -31,11 +31,32 @@ sigma = 0.01            # Standard dev. of noise (volatility)
 withAnnihilation = True # Whether dislocations disappear from system after annihilation
 collTres = 3e-3         # Collision threshold
 stress = 0              # External force (also called 'F')
-withCreation = False     # Whether to include creation
 creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' 
 Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
 tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
 domain = (0,1)          # Interval where initial dislocations and sources are placed 
+N = 20                  # Number of initial dislocations
+M = 20                  # Number of sources
+
+
+# # For Figure 6.4a, uncomment following lines: 
+# withCreation = False     # Whether to include creation
+# N, M = 20, 20 # Number of initial dislocations and sources respectively
+
+# # For Figure 6.4b, uncomment following lines: 
+withCreation = True     # Whether to include creation
+N, M = 20, 20
+creaProc = 'lin'
+
+# # For Figure 6.4c, uncomment following lines: 
+# withCreation = True     # Whether to include creation
+# N, M = 20, 20
+# creaProc = 'zero'
+
+# # For Figure 6.4d, uncomment following lines: 
+# withCreation = True     # Whether to include creation
+# N, M = 20, 20
+# creaProc = 'dist'
 
 
 
@@ -63,8 +84,8 @@ def setExample(N):
     
     
     elif N == 1: ### Example 1:
-        initialPositions = np.array([0.5]) 
-        initialCharges = np.array([1])
+        initialPositions = np.array([0.5,]) 
+        initialCharges = np.array([1,])
         
         
     elif N == 2: ### Example 2: 
@@ -82,7 +103,7 @@ def setExample(N):
                                      0.36315111, 0.60467167, 0.68111491, 0.72468363, 0.7442808 ])
         initialCharges = np.array([-1.,  1., -1., -1.,  1.,  1.,  1., -1.,  1., -1.])
     
-    elif N == -2: # Additional comparison case (randomly generated but fixed): 
+    elif N == 20: # Additional comparison case (randomly generated but fixed): 
         initialPositions = np.array([0.90041661, 0.09512205, 0.93625452, 0.67799578, 0.49170662,
             0.1327828 , 0.17790777, 0.76411685, 0.97124885, 0.22572291,
             0.4294073 , 0.87120555, 0.60016304, 0.97865076, 0.52582236,
@@ -139,10 +160,9 @@ def setSources(M):
     nrSources = len(sourceLocs)
 
 
-setExample(-2) 
+setExample(N) 
 if withCreation: 
-    setSources(20)
-
+    setSources(M)
 
 
 
@@ -495,6 +515,8 @@ while t < simTime:
                 b[i2] = 0
                 x[i1] = np.nan
                 x[i2] = np.nan
+                
+                annihilations.append(Annihilation(t,(i1,i2)))
     
     
     interactions = interaction(diff,dist,b, regularisation = reg)
@@ -580,6 +602,7 @@ def plot1D(bInitial, trajectories, t, log = False):
         plt.yscale('log')
         plt.ylim((t[0],t[-1])) 
     
+    plt.vlines(sourceLocs, 0, t[-1], alpha = 0.25) # plot sources
     
     for i in range(nrTrajectories):
         x_current = trajectories[:,i]
@@ -588,6 +611,9 @@ def plot1D(bInitial, trajectories, t, log = False):
         plt.plot(x_current, y_current, c = colorDict.get(bInitial[i]))
         # Set colour of created dislocations according to charge they 
         # eventually get (not 0, which they begin with)
+    
+    plt.xlabel('$x$')
+    plt.ylabel('$t$')
 
 
 
