@@ -522,7 +522,6 @@ while t < simTime:
         # Identifies pairs with opposite charge closer than collTres together 
         #('*' works as and-operator for 0/1 booleans). Format: ([parts A], [parts B]).
         
-            
         # Go through list sequentially, annihilating not-yet-annihilated dislocs. 
         for i in range(len(collPart1)): 
             i1 = collPart1[i]

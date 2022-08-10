@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jan 11 09:36:14 2022
@@ -20,23 +21,24 @@ from scipy.optimize import root
 #%% INITIALISATION
 
 ### Simulation settings
-simTime = 0.12         # Total simulation time
+simTime = 1         # Total simulation time
 dt = 0.001              # Timestep for discretisation (or maximum, if adaptive)
 minTimestep = 1e-7      # Minimum size of timestep (for adaptive)
 adaptiveTime = True     # Whether to use adaptive timestep in integrator
-reg = 'cutoff'          # Regularisation; either 'eps', 'V1', 'cutoff' or 'none'
+reg = 'none'          # Regularisation; either 'eps', 'V1', 'cutoff' or 'none'
 eps = 0.01              # Regularisation parameter (for all three methods)
 randomness = False      # Whether to add random noise to dislocation positions 
 sigma = 0.01            # Standard dev. of noise (volatility)
 withAnnihilation = True # Whether dislocations disappear from system after annihilation
+withCreation = True     # Whether to include creation
 collTres = 3e-3         # Collision threshold
-stress = 0              # External force (also called 'F')
-creaProc = 'zero'       # Creation procedure; either 'lin', 'zero' or 'dist' 
-Fnuc = 5               # Threshold for magnitude of Peach-Koehler force 
-tnuc = 0.01            # Threshold for duration of PK force magnitude before creation
+stress = 1              # External force (also called 'F')
+creaProc = 'dist'       # Creation procedure; either 'lin', 'zero' or 'dist' 
+Fnuc = 0.5               # Threshold for magnitude of Peach-Koehler force 
+tnuc = 0.01           # Threshold for duration of PK force magnitude before creation
 domain = (0,1)          # Interval where initial dislocations and sources are placed 
-N = 20                  # Number of initial dislocations
-M = 20                  # Number of sources
+# N = 10                  # Number of initial dislocations
+# M = 10                  # Number of sources
 
 
 # # For Figure 6.4a, uncomment following lines: 
@@ -44,9 +46,9 @@ M = 20                  # Number of sources
 # N, M = 20, 20 # Number of initial dislocations and sources respectively
 
 # # For Figure 6.4b, uncomment following lines: 
-withCreation = True     # Whether to include creation
-N, M = 20, 20
-creaProc = 'lin'
+# withCreation = True     # Whether to include creation
+# N, M = 20, 20
+# creaProc = 'lin'
 
 # # For Figure 6.4c, uncomment following lines: 
 # withCreation = True     # Whether to include creation
@@ -160,11 +162,14 @@ def setSources(M):
     nrSources = len(sourceLocs)
 
 
-setExample(N) 
-if withCreation: 
-    setSources(M)
+# setExample(N) 
+# if withCreation: 
+#     setSources(M)
 
+initialPositions = np.array([1,]) 
+initialCharges = np.array([1,])
 
+setSources(1)
 
 # %% DEFINITIONS
 def pairwiseDistance(x1, x2 = None):
@@ -363,6 +368,7 @@ class Creation:
         self.creaTime = t
         self.idx = idx
         self.inProgress = True
+        print(f"Creation occurred at position {loc}")
             
     
     def createDipole(self):
@@ -372,11 +378,11 @@ class Creation:
         if creaProc == 'lin': 
             self.texc = forceTotexcFast(self.PKAtCrea) # Choose fnct giving texc here
             
-            locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
+            locs = np.array([self.loc - 0.51*collTres, self.loc + 0.51*collTres])
         
         elif creaProc == 'zero': 
             self.texc = 1/(2*np.abs(self.PKAtCrea))**2
-            locs = np.array([self.loc - 0.5*collTres, self.loc + 0.5*collTres])
+            locs = np.array([self.loc - 0.51*collTres, self.loc + 0.51*collTres])
         
         elif creaProc == 'dist':
             self.Lnuc = 1/(np.abs(self.PKAtCrea))
@@ -602,7 +608,8 @@ def plot1D(bInitial, trajectories, t, log = False):
         plt.yscale('log')
         plt.ylim((t[0],t[-1])) 
     
-    plt.vlines(sourceLocs, 0, t[-1], alpha = 0.25) # plot sources
+    if withCreation: 
+        plt.vlines(sourceLocs, 0, t[-1], alpha = 0.25) # plot sources
     
     for i in range(nrTrajectories):
         x_current = trajectories[:,i]

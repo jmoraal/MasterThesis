@@ -195,6 +195,9 @@ def plotODESol(solution, charges, log = False, annihilationTimes = None):
         t_new = t_current
         
         plt.plot(x_new, t_new, c = colorDict.get(charges[i]))
+    
+    plt.xlabel('$x$')
+    plt.ylabel('$t$')
         
     plt.show()
 

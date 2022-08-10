@@ -271,7 +271,7 @@ plotAll() # Phase-space, trajectories & vector field
 t, F = plotRcritZeros()
 
 
-## Fit solution to curve of given form:  [see below arrays]
+## Fit solution to curve of given form:  [execute below arrays]
 
 # Solving is slow, so may take following data instead of plotRcritZeros(): 
     

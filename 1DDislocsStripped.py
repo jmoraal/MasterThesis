@@ -211,15 +211,6 @@ def interaction(diff,dist,b, regularisation = 'eps'):
     
     return interactions, chargeArray
 
-    
-def projectParticles(x):
-    """Projects particles into box of given size."""
-    
-    x[np.isfinite(x)] %= 1 # Also works in multi-D as long as box has same length in each dimension. Else, rewrite function to modulate in each dimension
-    # Index by isfinite to not affect np.nan (still works otherwise, but gives warning)
-
-    return x
-
 
 
 def PeachKoehler(sources, x, b, regularisation = 'eps'):
